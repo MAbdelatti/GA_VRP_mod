@@ -681,6 +681,16 @@ def select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize):
     pop_d[0.95*popsize:popsize, :] = child_d_2[0:0.05*popsize, :]
     # pop_d[0.85*popsize:popsize, :] = child_d_2[0:0.15*popsize, :]
     # pop_d[0.5*popsize:popsize, :] = child_d_2[0:0.5*popsize, :]
+
+def cp_unique_axis0(array):
+    if len(array.shape) != 2:
+        raise ValueError("Input array must be 2D.")
+    sortarr     = array[cp.lexsort(array.T[::-1])]
+    mask        = cp.empty(array.shape[0], dtype=np.bool_)
+    mask[0]     = True
+    mask[1:]    = cp.any(sortarr[1:] != sortarr[:-1], axis=1)
+    return sortarr[mask]
+
 # ------------------------- Start Main ------------------------------------------------------------
 try:
     vrp_capacity, data, opt = readInput()
@@ -723,7 +733,7 @@ try:
 
     # GPU grid configurations:
     threads_per_block = (20, 20) #20 x 20 by default
-    blocks_no = 30
+    blocks_no = 35 
 
     blocks = (blocks_no, blocks_no)
     # --------------Calculate the cost table----------------------------------------------
@@ -758,7 +768,7 @@ try:
 
     pop_d = pop_d[pop_d[:,-1].argsort()] # Sort the population to get the best later
 
-    asnumpy_first_pop = cp.asnumpy(pop_d)
+    # asnumpy_first_pop = cp.asnumpy(pop_d)
 
     # --------------Evolve population for some generations----------------------------------------------
     # Create the pool of 6 arrays of the same length
@@ -861,31 +871,31 @@ try:
         # --------------------------------------------------------------------------
         
         # Replacing duplicates with random individuals from child_d_1
+        pop_d = cp_unique_axis0(pop_d)
         # asnumpy_pop_d = cp.asnumpy(pop_d) # copy pop_d to host, HOWEVER, it throws cudaErrorIllegalAddress in >= 800 nodes
         # asnumpy_child_d_1 = cp.asnumpy(child_d_1) # copy child_d_1 to host
-        # repeats = 0
+        repeats = 0
         
         # x = np.unique(asnumpy_pop_d[:,1:], axis=0)
         # # print('X pre:', x.shape[0], x, '\n-------------\n')
-        # while x.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-        #     rndm = random.randint(0, popsize-1)
-        #     x = np.append(x, [asnumpy_child_d_1[rndm,1:]], axis=0)
-        #     x = np.unique(x, axis=0)
-        #     repeats += 1
+        while pop_d.shape[0] < popsize:
+            if repeats >= popsize-1:
+                break
+            rndm = random.randint(0, popsize-1)
+            pop_d = cp.concatenate((pop_d, cp.array([child_d_1[rndm,:]])), axis=0)
+            pop_d = cp_unique_axis0(pop_d)
+            repeats += 1
         # # --------------------------------------------------------------------------
         # # Replacing duplicates with random individuals from child_d_2
         # asnumpy_child_d_2 = cp.asnumpy(child_d_2) # copy child_d_2 to host
-        # repeats = 0
-        
-        # while x.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-        #     rndm = random.randint(0, popsize-1)
-        #     x = np.append(x, [asnumpy_child_d_2[rndm,1:]], axis=0)       
-        #     x = np.unique(x, axis=0)
-        #     repeats += 1
+        repeats = 0
+        while pop_d.shape[0] < popsize:
+            if repeats >= popsize-1:
+                break
+            rndm = random.randint(0, popsize-1)
+            pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
+            # pop_d = cp_unique_axis0(pop_d)
+            repeats += 1
         # # --------------------------------------------------------------------------
         # # Replacing duplicates with random individuals from parent_d_1
         # asnumpy_parent_d_1 = cp.asnumpy(parent_d_1) # copy parent_d_1 to host
@@ -969,7 +979,7 @@ try:
             # print('At first generation, Best: %d,'%minimum_cost, 'Worst: %d'%worst_cost, \
             #     'delta: %d'%delta, 'Avg: %.2f'%average, file=text_out)
             # text_out.close()
-        elif (count+1)%50 == 0:
+        elif (count+1)%100 == 0:
             print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
                 'delta: %d'%delta, 'Avg: %.2f'%average)
             # text_out = open('1000.out', 'a')
