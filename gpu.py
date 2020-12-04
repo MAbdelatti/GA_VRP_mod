@@ -137,6 +137,7 @@ def calc_cost_gpu(data_d, popsize, vrp_capacity, cost_table_d):
         for col in range(threadId_col, data_d.shape[0], stride_y):
             cost_table_d[row, col] = \
             round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))
+
 # ------------------------- End calculating the cost table ----------------------------------------
 
 # ------------------------- Start fitness calculation ---------------------------------------------
@@ -441,11 +442,11 @@ def number_cut_points(candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1
             min(candid_d_1[row, 2], candid_d_2[row, 2]) 
 
             # Number of cutting points = (n/5 - 2)
-            # candid_d_1[row, 4] = candid_d_1[row, 3]//20 - 2
-            n_points = max(min_n, (count%(max_n*4000))//4000) # the n_points increases one every 5000 iterations till 20 then resets to 2 and so on
-            candid_d_1[row, 4] = n_points
-    
+            candid_d_1[row, 4] = candid_d_1[row, 3]//20 - 2
+            # n_points = max(min_n, (count%(max_n*4000))//4000) # the n_points increases one every 5000 iterations till 20 then resets to 2 and so on
+            candid_d_1[row, 4] = 2 # n_points is replaced by 2 for 2-point crossover
     cuda.syncthreads()
+
 @cuda.jit
 def add_cut_points(candid_d_1, candid_d_2, rng_states):
     threadId_row, threadId_col = cuda.grid(2)
@@ -486,6 +487,7 @@ def add_cut_points(candid_d_1, candid_d_2, rng_states):
                     candid_d_2[row, i], candid_d_2[row, min_index]
 
     cuda.syncthreads()
+
 @cuda.jit
 def cross_over_gpu(random_arr, candid_d_1, candid_d_2, child_d_1, child_d_2, parent_d_1, parent_d_2, crossover_prob):
     threadId_row, threadId_col = cuda.grid(2)
@@ -639,19 +641,34 @@ def update_pop(count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d):
                 pop_d[row, 0] = count
                 
     cuda.syncthreads()
+# ------------------------- Mutation Fucntion --------------------------------------------------------
+@cuda.jit
+def inverse_mutate(random_min_max, pop, random_arr, mutation_prob):
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y = cuda.gridsize(2)
+    
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        if random_arr[row,0] <= mutation_prob:
+            for col in range(threadId_col, pop.shape[1], stride_y):
+                start  = random_min_max[row, 0]
+                ending = random_min_max[row, 1]
+                length = ending - start
+                diff   = col - start
+                if col >= start and col < start+ceil(length/2):
+                    pop[row, col], pop[row, ending-diff] = pop[row, ending-diff], pop[row, col]
 
 # ------------------------- Definition of CPU functions ----------------------------------------------   
-def inverse_mutate(pop, popsize, mutation_prob):
-    random_min_max = cp.random.randint(2, pop.shape[1]-2, (popsize, 2))
-    random_min_max.sort()
-
-    # mutation_prob = 10
-    random_arr = cp.random.randint(1, 100, (popsize, 1))
-    for i, individual in enumerate(pop):
-        if random_arr[i] <= mutation_prob:
-            individual = cp.concatenate((individual[0:random_min_max[i,0]],\
-            cp.flip(individual[random_min_max[i,0]:random_min_max[i,1]], axis=0), individual[random_min_max[i,1]:]))
-            pop[i,:] = individual[:]
+#def inverse_mutate(pop, popsize, mutation_prob):
+#    random_min_max = cp.random.randint(2, pop.shape[1]-2, (popsize, 2))
+#    random_min_max.sort()
+#
+#    # mutation_prob = 10
+#    random_arr = cp.random.randint(1, 100, (popsize, 1))
+#    for i, individual in enumerate(pop):
+#        if random_arr[i] <= mutation_prob:
+#            individual = cp.concatenate((individual[0:random_min_max[i,0]],\
+#            cp.flip(individual[random_min_max[i,0]:random_min_max[i,1]], axis=0), individual[random_min_max[i,1]:]))
+#            pop[i,:] = individual[:]
 
 def select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize):
     # Select the best 5% from paernt 1 & parent 2:
@@ -764,7 +781,6 @@ try:
     # --------------Calculate fitness----------------------------------------------
     fitness_gpu[blocks, threads_per_block](cost_table_d, pop_d, fitness_val_d)
     # print(pop_d[:,40], pop_d.shape)
-    # marwan
 
     pop_d = pop_d[pop_d[:,-1].argsort()] # Sort the population to get the best later
 
@@ -815,22 +831,31 @@ try:
 
         select_parents[blocks, threads_per_block]\
                     (pop_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1, parent_d_2)  
-
+        
         number_cut_points[blocks, threads_per_block](candid_d_1, candid_d_2, \
                             candid_d_3, candid_d_4, parent_d_1, parent_d_2, count, min_n, max_n)
-
+        
         rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
         add_cut_points[blocks, threads_per_block](candid_d_1, candid_d_2, rng_states)
-
+        
         random_arr = cp.random.randint(1, 100, (popsize, 1))
         cross_over_gpu[blocks, threads_per_block](random_arr, candid_d_1, candid_d_2, child_d_1, child_d_2, parent_d_1, parent_d_2, crossover_prob)
-
+        
         # Performing mutation
         rng_states = create_xoroshiro128p_states(popsize*child_d_1.shape[1], seed=random.randint(2,2*10**5))
         # mutate[blocks, threads_per_block](rng_states, child_d_1, child_d_2, mutation_prob)
-        inverse_mutate(child_d_1, popsize, mutation_prob)
-        inverse_mutate(child_d_2, popsize, mutation_prob)
-
+        random_min_max = cp.random.randint(2, pop_d.shape[1]-2, (popsize, 2))
+        random_min_max.sort()
+        random_arr = cp.random.randint(1, 100, (popsize, 1))
+        inverse_mutate[blocks, threads_per_block](random_min_max, child_d_1, random_arr, mutation_prob)
+        
+        random_min_max = cp.random.randint(2, pop_d.shape[1]-2, (popsize, 2))
+        random_min_max.sort()
+        random_arr = cp.random.randint(1, 100, (popsize, 1))
+        inverse_mutate[blocks, threads_per_block](random_min_max, child_d_2, random_arr, mutation_prob)
+#        inverse_mutate(child_d_1, popsize, mutation_prob)
+#        inverse_mutate(child_d_2, popsize, mutation_prob)
+        
         # Adjusting child_1 array
         find_duplicates[blocks, threads_per_block](child_d_1, r_flag)
 
@@ -840,7 +865,7 @@ try:
         shift_r_flag[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)
         cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)
         cleanup_r_flag[blocks, threads_per_block](r_flag, child_d_1)
-
+        
         # Adjusting child_2 array
         find_duplicates[blocks, threads_per_block](child_d_2, r_flag)
 
@@ -869,13 +894,11 @@ try:
         # update_pop[blocks, threads_per_block](count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d)
         select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize)
         # --------------------------------------------------------------------------
-        
         # Replacing duplicates with random individuals from child_d_1
         pop_d = cp_unique_axis0(pop_d)
         # asnumpy_pop_d = cp.asnumpy(pop_d) # copy pop_d to host, HOWEVER, it throws cudaErrorIllegalAddress in >= 800 nodes
         # asnumpy_child_d_1 = cp.asnumpy(child_d_1) # copy child_d_1 to host
         repeats = 0
-        
         # x = np.unique(asnumpy_pop_d[:,1:], axis=0)
         # # print('X pre:', x.shape[0], x, '\n-------------\n')
         while pop_d.shape[0] < popsize:
@@ -1040,7 +1063,6 @@ except KeyboardInterrupt:
     current_time = timer()
     total_time = float('{0:.4f}'.format((current_time - old_time)))
     time_per_loop = float('{0:.4f}'.format((current_time - old_time)/(count-1)))
-
     best_sol = cp.subtract(best_sol, cp.ones_like(best_sol))
     best_sol[0] = best_sol[0] + 1
     best_sol[-1] = best_sol[-1] + 1    
