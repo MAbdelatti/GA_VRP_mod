@@ -894,23 +894,19 @@ try:
         # update_pop[blocks, threads_per_block](count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d)
         select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize)
         # --------------------------------------------------------------------------
-        # Replacing duplicates with random individuals from child_d_1
+        # # # Replacing duplicates with random individuals from child_d_1
         pop_d = cp_unique_axis0(pop_d)
-        # asnumpy_pop_d = cp.asnumpy(pop_d) # copy pop_d to host, HOWEVER, it throws cudaErrorIllegalAddress in >= 800 nodes
-        # asnumpy_child_d_1 = cp.asnumpy(child_d_1) # copy child_d_1 to host
         repeats = 0
-        # x = np.unique(asnumpy_pop_d[:,1:], axis=0)
-        # # print('X pre:', x.shape[0], x, '\n-------------\n')
         while pop_d.shape[0] < popsize:
             if repeats >= popsize-1:
                 break
             rndm = random.randint(0, popsize-1)
             pop_d = cp.concatenate((pop_d, cp.array([child_d_1[rndm,:]])), axis=0)
-            pop_d = cp_unique_axis0(pop_d)
+            # pop_d = cp_unique_axis0(pop_d)
             repeats += 1
         # # --------------------------------------------------------------------------
         # # Replacing duplicates with random individuals from child_d_2
-        # asnumpy_child_d_2 = cp.asnumpy(child_d_2) # copy child_d_2 to host
+        pop_d = cp_unique_axis0(pop_d)
         repeats = 0
         while pop_d.shape[0] < popsize:
             if repeats >= popsize-1:
@@ -919,30 +915,28 @@ try:
             pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
             # pop_d = cp_unique_axis0(pop_d)
             repeats += 1
-        # # --------------------------------------------------------------------------
-        # # Replacing duplicates with random individuals from parent_d_1
-        # asnumpy_parent_d_1 = cp.asnumpy(parent_d_1) # copy parent_d_1 to host
-        # repeats = 0
-        # while x.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-                
-        #     rndm = random.randint(0, popsize-1)
-        #     x = np.append(x, [asnumpy_parent_d_1[rndm,1:]], axis=0)       
-        #     x = np.unique(x, axis=0)
-        #     repeats += 1
-        # # --------------------------------------------------------------------------
-        # # Replacing duplicates with random individuals from parent_d_2
-        # asnumpy_parent_d_2 = cp.asnumpy(parent_d_2) # copy parent_d_1 to host
-        # repeats = 0
-        # while x.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-                
-        #     rndm = random.randint(0, popsize-1)
-        #     x = np.append(x, [asnumpy_parent_d_2[rndm,1:]], axis=0)       
-        #     # x = np.unique(x, axis=0)
-        #     repeats += 1
+        # --------------------------------------------------------------------------
+        # Replacing duplicates with random individuals from parent_d_1
+        pop_d = cp_unique_axis0(pop_d)
+        repeats = 0
+        while pop_d.shape[0] < popsize:
+            if repeats >= popsize-1:
+                break
+            rndm = random.randint(0, popsize-1)
+            pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
+            # pop_d = cp_unique_axis0(pop_d)
+            repeats += 1
+        # --------------------------------------------------------------------------
+        # Replacing duplicates with random individuals from parent_d_2
+        pop_d = cp_unique_axis0(pop_d)
+        repeats = 0
+        while pop_d.shape[0] < popsize:
+            if repeats >= popsize-1:
+                break
+            rndm = random.randint(0, popsize-1)
+            pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
+            # pop_d = cp_unique_axis0(pop_d)
+            repeats += 1
         # # --------------------------------------------------------------------------
         # x = np.insert(x, 0, count, axis=1)
         # pop_d = cp.array(x)
