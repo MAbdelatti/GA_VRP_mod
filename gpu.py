@@ -7,7 +7,10 @@ from timeit import default_timer as timer
 import numpy as np
 import random
 import sys
+import shutil
 np.set_printoptions(threshold=sys.maxsize)
+import gpuGrid
+import val
 # -------- End of the importing part -----------
 
 # ------------------------- Start reading the data file -------------------------------------------
@@ -26,9 +29,9 @@ def readInput():
     vrpManager = vrp()
 	# First reading the VRP from the input #
     print('Reading data file...', end=' ')
-    text_out = open('1000.out', 'a')
-    print('Reading data file...', end=' ', file=text_out)
-    text_out.close()
+    # text_out = open('1000.out', 'a')
+    # print('Reading data file...', end=' ', file=text_out)
+    # text_out.close()
     fo = open('test_set/%s/'%sys.argv[1][0]+sys.argv[1]+'.vrp',"r")
     lines = fo.readlines()
     for i, line in enumerate(lines):       
@@ -43,24 +46,23 @@ def readInput():
                         vrpManager.opt = float(inputs[-1][:-1])
                     except:
                         print('\nNo optimal value detected, taking optimal as 0.0')
-                        text_out = open('1000.out', 'a')
-                        print('\nNo optimal value detected, taking optimal as 0.0', file=text_out)
-                        text_out.close()
+                        # text_out = open('1000.out', 'a')
+                        # print('\nNo optimal value detected, taking optimal as 0.0', file=text_out)
+                        # text_out.close()
                         vrpManager.opt = 0.0
                     break
             else:
                 vrpManager.opt = np.int32(sys.argv[3])
                 print('\nManual optimal value entered: %d'%vrpManager.opt)
-                text_out = open('1000.out', 'a')
-                print('\nManual optimal value entered: %d'%vrpManager.opt, file=text_out)
-                text_out.close()
+                # text_out = open('1000.out', 'a')
+                # print('\nManual optimal value entered: %d'%vrpManager.opt, file=text_out)
+                # text_out.close()
                 break
 
         # Validating positive non-zero capacity
         if vrpManager.opt < 0:
             print(sys.stderr, "Invalid input: optimal value can't be negative!")
-            text_out = open('1000.out', 'a')
-            print(sys.stderr, "Invalid input: optimal value can't be negative!", file=text_out)
+
             text_out.close()
             exit(1)
             break
@@ -71,9 +73,9 @@ def readInput():
 			# Validating positive non-zero capacity
             if vrpManager.capacity <= 0:
                 print(sys.stderr, 'Invalid input: capacity must be neither negative nor zero!')
-                text_out = open('1000.out', 'a')
-                print(sys.stderr, 'Invalid input: capacity must be neither negative nor zero!', file=text_out)
-                text_out.close()
+                # text_out = open('1000.out', 'a')
+                # print(sys.stderr, 'Invalid input: capacity must be neither negative nor zero!', file=text_out)
+                # text_out.close()
                 exit(1)
             break       
         while line.upper().startswith('NODE_COORD_SECTION'):
@@ -98,18 +100,18 @@ def readInput():
                         if float(inputs[1]) > vrpManager.capacity:
                             print(sys.stderr,
 							'Invalid input: the demand of the node %s is greater than the vehicle capacity!' % vrpManager.nodes[0])
-                            text_out = open('1000.out', 'a')
-                            print(sys.stderr,
-							'Invalid input: the demand of the node %s is greater than the vehicle capacity!' % vrpManager.nodes[0], file=text_out)
-                            text_out.close()
+                            # text_out = open('1000.out', 'a')
+                            # print(sys.stderr,
+							# 'Invalid input: the demand of the node %s is greater than the vehicle capacity!' % vrpManager.nodes[0], file=text_out)
+                            # text_out.close()
                             exit(1)
                         if float(inputs[1]) < 0:
                             print(sys.stderr,
                             'Invalid input: the demand of the node %s cannot be negative!' % vrpManager.nodes[0])
-                            text_out = open('1000.out', 'a')
-                            print(sys.stderr,
-                            'Invalid input: the demand of the node %s cannot be negative!' % vrpManager.nodes[0], file=text_out)
-                            text_out.close()
+                            # text_out = open('1000.out', 'a')
+                            # print(sys.stderr,
+                            # 'Invalid input: the demand of the node %s cannot be negative!' % vrpManager.nodes[0], file=text_out)
+                            # text_out.close()
                             exit(1)                            
                         vrpManager.nodes[int(inputs[0])][1] =  float(inputs[1])
                         i += 1
@@ -121,9 +123,9 @@ def readInput():
                         if line.upper().startswith('DEPOT_SECTION'):
                             vrpManager.nodes = np.delete(vrpManager.nodes, 0, 0) 
                             print('Done.')
-                            text_out = open('1000.out', 'a')                         
-                            print('Done.', file=text_out)
-                            text_out.close()
+                            # text_out = open('1000.out', 'a')                         
+                            # print('Done.', file=text_out)
+                            # text_out.close()
                             return(vrpManager.capacity, vrpManager.nodes, vrpManager.opt)
 # ------------------------- End of reading the input data file ------------------------------------
 
@@ -718,9 +720,9 @@ try:
     
     # popsize = 500
     print('Taking population size {}*number of nodes'.format(n))
-    text_out = open('1000.out', 'a')
-    print('Taking population size {}*number of nodes'.format(n),file=text_out)
-    text_out.close()
+    # text_out = open('1000.out', 'a')
+    # print('Taking population size {}*number of nodes'.format(n),file=text_out)
+    # text_out.close()
     min_n = 1 # Minimum number of crossover points
     max_n = 1 # Maximum number of crossover points
 
@@ -728,31 +730,38 @@ try:
         generations = int(sys.argv[2])
     except:
         print('No generation limit provided, taking 2000 generations...')
-        text_out = open('1000.out', 'a')
-        print('No generation limit provided, taking 2000 generations...', file=text_out)
-        text_out.close()
+        # text_out = open('1000.out', 'a')
+        # print('No generation limit provided, taking 2000 generations...', file=text_out)
+        # text_out.close()
         generations = 2000
 
     r_flag = 9999 # A flag for removal/replacement
 
-    data_d = cuda.to_device(data)
+    data_d       = cuda.to_device(data)
     cost_table_d = cuda.device_array(shape=(data.shape[0], data.shape[0]), dtype=np.int32)
 
     pop_d = cp.ones((popsize, int(2*data.shape[0])+2), dtype=np.int32)
 
-    missing_d = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int32)
-
-    missing = np.ones(shape=(popsize,1), dtype=np.bool)
+    missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int32)
+    missing          = np.ones(shape=(popsize,1), dtype=np.bool)
     missing_elements = cuda.to_device(missing)
 
-    fitness_val = np.zeros(shape=(popsize,1), dtype=np.int32)
+    fitness_val   = np.zeros(shape=(popsize,1), dtype=np.int32)
     fitness_val_d = cuda.to_device(fitness_val)
 
     # GPU grid configurations:
-    threads_per_block = (20, 20) #20 x 20 by default
-    blocks_no = 35 
+    grid      = gpuGrid.GRID()
+    blocks_x, blocks_y = grid.blockAlloc(data.shape[0], float(n))
+    # blocks_no = 20
+    tpb_x, tpb_y      = grid.threads_x, grid.threads_y
 
-    blocks = (blocks_no, blocks_no)
+    print(grid)
+    blocks            = (blocks_x, blocks_y)
+    threads_per_block = (tpb_x, tpb_y)   
+
+    val = val.VRP(sys.argv[1])
+    val.read()
+    val.costTable()
     # --------------Calculate the cost table----------------------------------------------
     calc_cost_gpu[blocks, threads_per_block](data_d, popsize, vrp_capacity, cost_table_d)
     # --------------Initialize population----------------------------------------------
@@ -996,9 +1005,10 @@ try:
             # print('At first generation, Best: %d,'%minimum_cost, 'Worst: %d'%worst_cost, \
             #     'delta: %d'%delta, 'Avg: %.2f'%average, file=text_out)
             # text_out.close()
-        elif (count+1)%100 == 0:
+        elif (count+1)%1 == 0:
             print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
                 'delta: %d'%delta, 'Avg: %.2f'%average)
+            val.validate(pop_d,1)
             # text_out = open('1000.out', 'a')
             # print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
             #     'delta: %d'%delta, 'Avg: %.2f'%average, file=text_out)
@@ -1026,13 +1036,13 @@ try:
         %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n')
     print('Best solution:', best_sol, end = '\n---------\n')
 
-    text_out = open('1000.out', 'a')
-    print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
-    print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
-    print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
-        %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
-    print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
-    text_out.close()
+    # text_out = open('1000.out', 'a')
+    # print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
+    # print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
+    # print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
+        # %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
+    # print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
+    # text_out.close()
 
     del data_d
     del cost_table_d
@@ -1067,14 +1077,14 @@ except KeyboardInterrupt:
         %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n')
     print('Best solution:', best_sol, end = '\n---------\n')
 
-    text_out = open('1000.out', 'a')
-    print('\nKeyboard interrupted...', file=text_out)
-    print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
-    print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
-    print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
-        %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
-    print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
-    text_out.close()
+    # text_out = open('1000.out', 'a')
+    # print('\nKeyboard interrupted...', file=text_out)
+    # print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
+    # print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
+    # print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
+        # %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
+    # print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
+    # text_out.close()
 
     del data_d
     del cost_table_d
