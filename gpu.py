@@ -25,9 +25,9 @@ class vrp():
 
 def readInput():
 
-	# Create VRP object:
+    # Create VRP object:
     vrpManager = vrp()
-	# First reading the VRP from the input #
+    # First reading the VRP from the input #
     print('Reading data file...', end=' ')
     # text_out = open('1000.out', 'a')
     # print('Reading data file...', end=' ', file=text_out)
