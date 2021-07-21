@@ -32,7 +32,7 @@ def readInput():
     # text_out = open('1000.out', 'a')
     # print('Reading data file...', end=' ', file=text_out)
     # text_out.close()
-    fo = open('journal-set/{}'.format(sys.argv[1],"r")
+    fo = open('journal-set/{}'.format(sys.argv[1]),"r")
     lines = fo.readlines()
     for i, line in enumerate(lines):       
         while line.upper().startswith('COMMENT'):
@@ -69,7 +69,10 @@ def readInput():
 
         while line.upper().startswith('CAPACITY'):
             inputs = line.split()
-            vrpManager.capacity = np.float32(inputs[2])
+            try:
+                vrpManager.capacity = np.float32(inputs[2])
+            except IndexError:
+                vrpManager.capacity = np.float32(inputs[1])
 			# Validating positive non-zero capacity
             if vrpManager.capacity <= 0:
                 print(sys.stderr, 'Invalid input: capacity must be neither negative nor zero!')
@@ -713,6 +716,7 @@ def cp_unique_axis0(array):
 # ------------------------- Start Main ------------------------------------------------------------
 try:
     vrp_capacity, data, opt = readInput()
+    marwan
     n = int(sys.argv[4])
     crossover_prob = int(sys.argv[5])
     mutation_prob = int(sys.argv[6])
