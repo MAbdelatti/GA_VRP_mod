@@ -7,6 +7,7 @@ from timeit import default_timer as timer
 import numpy as np
 import random
 import sys
+from datetime import datetime
 import shutil
 np.set_printoptions(threshold=sys.maxsize)
 import gpuGrid
@@ -716,7 +717,6 @@ def cp_unique_axis0(array):
 # ------------------------- Start Main ------------------------------------------------------------
 try:
     vrp_capacity, data, opt = readInput()
-    marwan
     n = int(sys.argv[4])
     crossover_prob = int(sys.argv[5])
     mutation_prob = int(sys.argv[6])
@@ -763,7 +763,7 @@ try:
     blocks            = (blocks_x, blocks_y)
     threads_per_block = (tpb_x, tpb_y)   
 
-    val = val.VRP(sys.argv[1])
+    val = val.VRP(sys.argv[1], data.shape[0])
     val.read()
     val.costTable()
     # --------------Calculate the cost table----------------------------------------------
@@ -1012,7 +1012,6 @@ try:
         elif (count+1)%1 == 0:
             print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
                 'delta: %d'%delta, 'Avg: %.2f'%average)
-            val.validate(pop_d,1)
             # text_out = open('1000.out', 'a')
             # print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
             #     'delta: %d'%delta, 'Avg: %.2f'%average, file=text_out)
@@ -1029,6 +1028,7 @@ try:
     current_time = timer()
     total_time = float('{0:.4f}'.format((current_time - old_time)))
     time_per_loop = float('{0:.4f}'.format((current_time - old_time)/(count-1)))
+    val.validate(pop_d, 1)
 
     best_sol = cp.subtract(best_sol, cp.ones_like(best_sol))
     best_sol[0] = best_sol[0] + 1
@@ -1040,13 +1040,13 @@ try:
         %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n')
     print('Best solution:', best_sol, end = '\n---------\n')
 
-    # text_out = open('1000.out', 'a')
-    # print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
-    # print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
-    # print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
-        # %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
-    # print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
-    # text_out.close()
+    text_out = open('results/'+sys.argv[1]+str(datetime.now())+'.out', 'a')
+    print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
+    print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
+    print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
+        %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
+    print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
+    text_out.close()
 
     del data_d
     del cost_table_d
@@ -1081,14 +1081,13 @@ except KeyboardInterrupt:
         %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n')
     print('Best solution:', best_sol, end = '\n---------\n')
 
-    # text_out = open('1000.out', 'a')
-    # print('\nKeyboard interrupted...', file=text_out)
-    # print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
-    # print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
-    # print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
-        # %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
-    # print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
-    # text_out.close()
+    text_out = open('results/'+sys.argv[1]+str(datetime.now())+'.out', 'a')
+    print('---------\nProblem:', sys.argv[1], ', Best known:', opt, file=text_out)
+    print('Time elapsed:', total_time, 'secs', 'Time per loop:', time_per_loop, 'secs', end = '\n---------\n', file=text_out)
+    print('Stopped at generation %d, Best cost: %d, from Generation: %d'\
+        %(count-1, best_sol[-1], best_sol[0]), end = '\n---------\n', file=text_out)
+    print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
+    text_out.close()
 
     del data_d
     del cost_table_d

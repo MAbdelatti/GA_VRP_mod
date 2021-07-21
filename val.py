@@ -2,10 +2,10 @@ import numpy as np
 import os
 
 class VRP():
-    def __init__(self, problem):
+    def __init__(self, problem, n):
         self.file = problem
-        self.n = np.int64(self.file.split('-')[1][1:])
-        self.routes = np.int64(self.file.split('-')[2][1:])
+        self.n = n
+        # self.routes = np.int64(self.file.split('-')[2][1:])
         
         validation = 'results/validation/'
         self.log = validation + 'validate_' + problem + '_' + str(len(os.listdir(validation))) + '.out' 
@@ -30,7 +30,7 @@ class VRP():
         self.coordinates = np.array(coords, dtype=np.float64)
    
     def read(self):
-        f = open('test_set/' + self.file[0] + '/' + self.file + '.vrp', 'r')
+        f = open('journal-set/' + self.file, 'r')
         text = f.readlines()
 
         for i, line in enumerate(text):
