@@ -32,7 +32,7 @@ def readInput():
     # text_out = open('1000.out', 'a')
     # print('Reading data file...', end=' ', file=text_out)
     # text_out.close()
-    fo = open('test_set/%s/'%sys.argv[1][0]+sys.argv[1]+'.vrp',"r")
+    fo = open('journal-set/{}'.format(sys.argv[1],"r")
     lines = fo.readlines()
     for i, line in enumerate(lines):       
         while line.upper().startswith('COMMENT'):
