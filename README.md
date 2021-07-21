@@ -10,3 +10,14 @@ example:
 ```bash
 python gpu.py X-n1001-k43 50000 0 10 60 30
 ```
+
+For the journal branch:
+```bash
+python gpu.py <any file in the journal-set folder> <# of geberations> <known optimal or 0> <population size multiplier> <crossover operator> <mutation operator>
+```
+
+example:
+
+```bash
+python gpu.py 33.vrp 50000 0 10 60 30
+```
