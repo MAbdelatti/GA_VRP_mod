@@ -33,7 +33,7 @@ def readInput():
     # text_out = open('1000.out', 'a')
     # print('Reading data file...', end=' ', file=text_out)
     # text_out.close()
-    fo = open('journal-set/{}'.format(sys.argv[1]),"r")
+    fo = open(sys.argv[1],"r")
     lines = fo.readlines()
     for i, line in enumerate(lines):       
         while line.upper().startswith('COMMENT'):
@@ -159,7 +159,7 @@ def fitness_gpu(cost_table_d, pop, fitness_val_d):
         if threadId_col == 15:
             for i in range(pop.shape[1]-2):
                 fitness_val_d[row, 0] += \
-                cost_table_d[pop[row, i]-1, pop[row, i+1]-1]
+                (cost_table_d[pop[row, i]-1, pop[row, i+1]-1])//10 # Scaling the fitness to fit int16
             pop[row, -1] = fitness_val_d[row,0]
     
     cuda.syncthreads()
@@ -742,15 +742,15 @@ try:
     r_flag = 9999 # A flag for removal/replacement
 
     data_d       = cuda.to_device(data)
-    cost_table_d = cuda.device_array(shape=(data.shape[0], data.shape[0]), dtype=np.int32)
+    cost_table_d = cuda.device_array(shape=(data.shape[0], data.shape[0]), dtype=np.int16)
 
-    pop_d = cp.ones((popsize, int(2*data.shape[0])+2), dtype=np.int32)
+    pop_d = cp.ones((popsize, int(2*data.shape[0])+2), dtype=np.int16)
 
-    missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int32)
-    missing          = np.ones(shape=(popsize,1), dtype=np.bool)
+    missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int16)
+    missing          = np.ones(shape=(popsize,1), dtype=bool)
     missing_elements = cuda.to_device(missing)
 
-    fitness_val   = np.zeros(shape=(popsize,1), dtype=np.int32)
+    fitness_val   = np.zeros(shape=(popsize,1), dtype=np.int16)
     fitness_val_d = cuda.to_device(fitness_val)
 
     # GPU grid configurations:
@@ -794,18 +794,18 @@ try:
 
     # --------------Evolve population for some generations----------------------------------------------
     # Create the pool of 6 arrays of the same length
-    candid_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    candid_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    candid_d_3 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    candid_d_4 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    candid_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_3 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_4 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
 
-    parent_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    parent_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    parent_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    parent_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
 
-    child_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    child_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    child_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    child_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
 
-    cut_idx = np.ones(shape=(pop_d.shape[1]), dtype=np.int32)
+    cut_idx = np.ones(shape=(pop_d.shape[1]), dtype=np.int16)
     cut_idx_d = cuda.to_device(cut_idx)
 
     minimum_cost = float('Inf')
@@ -822,7 +822,7 @@ try:
         if minimum_cost <= opt:
             break
 
-        random_arr = np.arange(popsize, dtype=np.int32).reshape((popsize,1))
+        random_arr = np.arange(popsize, dtype=np.int16).reshape((popsize,1))
         random_arr = np.repeat(random_arr, 4, axis=1)
         
         random.shuffle(random_arr[:,0])
