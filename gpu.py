@@ -148,19 +148,19 @@ def calc_cost_gpu(data_d, popsize, vrp_capacity, cost_table_d):
 
 # ------------------------- Start fitness calculation ---------------------------------------------
 @cuda.jit
-def fitness_gpu(cost_table_d, pop, fitness_val_d):
+def fitness_gpu(cost_table_d, pop):
     threadId_row, threadId_col = cuda.grid(2)
     stride_x, stride_y = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):
-        fitness_val_d[row, 0] = 0
+        fitnessValue = 0
         pop[row, -1] = 1
         
         if threadId_col == 15:
             for i in range(pop.shape[1]-2):
-                fitness_val_d[row, 0] += \
+                fitnessValue += \
                 (cost_table_d[pop[row, i]-1, pop[row, i+1]-1])//10 # Scaling the fitness to fit int16
-            pop[row, -1] = fitness_val_d[row,0]
+            pop[row, -1] = fitnessValue
     
     cuda.syncthreads()
 
@@ -750,8 +750,8 @@ try:
     missing          = np.ones(shape=(popsize,1), dtype=bool)
     missing_elements = cuda.to_device(missing)
 
-    fitness_val   = np.zeros(shape=(popsize,1), dtype=np.int16)
-    fitness_val_d = cuda.to_device(fitness_val)
+    # fitness_val   = np.zeros(shape=(popsize,1), dtype=np.int16)
+    # fitness_val_d = cuda.to_device(fitness_val)
 
     # GPU grid configurations:
     grid      = gpuGrid.GRID()
@@ -785,7 +785,7 @@ try:
     cleanup_r_flag[blocks, threads_per_block](r_flag, pop_d)
 
     # --------------Calculate fitness----------------------------------------------
-    fitness_gpu[blocks, threads_per_block](cost_table_d, pop_d, fitness_val_d)
+    fitness_gpu[blocks, threads_per_block](cost_table_d, pop_d)
     # print(pop_d[:,40], pop_d.shape)
 
     pop_d = pop_d[pop_d[:,-1].argsort()] # Sort the population to get the best later
@@ -887,14 +887,14 @@ try:
         
         two_opt[blocks, threads_per_block](child_d_1, cost_table_d, candid_d_3)
 
-        fitness_gpu[blocks, threads_per_block](cost_table_d, child_d_1, fitness_val_d)
+        fitness_gpu[blocks, threads_per_block](cost_table_d, child_d_1)
         # --------------------------------------------------------------------------
         # Performing the two-opt optimization and Calculating fitness for child_2 array
         reset_to_ones[blocks, threads_per_block](candid_d_3)
 
         two_opt[blocks, threads_per_block](child_d_2, cost_table_d, candid_d_3)
 
-        fitness_gpu[blocks, threads_per_block](cost_table_d, child_d_2, fitness_val_d)
+        fitness_gpu[blocks, threads_per_block](cost_table_d, child_d_2)
         # --------------------------------------------------------------------------
         # Creating the new population from parents and children
         # update_pop[blocks, threads_per_block](count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d)
@@ -1045,7 +1045,7 @@ try:
     del cost_table_d
     del pop_d
     del missing_d
-    del fitness_val_d
+    # del fitness_val_d
 
     del candid_d_1
     del candid_d_2
@@ -1089,7 +1089,7 @@ except KeyboardInterrupt:
     del cost_table_d
     del pop_d
     del missing_d
-    del fitness_val_d
+    # del fitness_val_d
 
     del candid_d_1
     del candid_d_2
