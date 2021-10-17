@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -------- Start of the importing part -----------
 from numba import cuda, jit, int32, float32, int64
 from numba.cuda.random import create_xoroshiro128p_states, xoroshiro128p_uniform_float32, xoroshiro128p_normal_float32
@@ -744,7 +745,7 @@ try:
     data_d       = cuda.to_device(data)
     cost_table_d = cuda.device_array(shape=(data.shape[0], data.shape[0]), dtype=np.int16)
 
-    pop_d = cp.ones((popsize, int(2*data.shape[0])+2), dtype=np.int16)
+    pop_d = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int16)
 
     missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int16)
     missing          = np.ones(shape=(popsize,1), dtype=bool)
