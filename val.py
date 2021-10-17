@@ -30,7 +30,7 @@ class VRP():
         self.coordinates = np.array(coords, dtype=np.float64)
    
     def read(self):
-        f = open('journal-set/' + self.file, 'r')
+        f = open(self.file, 'r')
         text = f.readlines()
 
         for i, line in enumerate(text):
