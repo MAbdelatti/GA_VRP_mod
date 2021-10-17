@@ -899,58 +899,59 @@ try:
         # Creating the new population from parents and children
         # update_pop[blocks, threads_per_block](count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d)
         select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize)
-        # --------------------------------------------------------------------------
-        # # # Replacing duplicates with random individuals from child_d_1
-        pop_d = cp_unique_axis0(pop_d)
-        repeats = 0
-        while pop_d.shape[0] < popsize:
-            if repeats >= popsize-1:
-                break
-            rndm = random.randint(0, popsize-1)
-            pop_d = cp.concatenate((pop_d, cp.array([child_d_1[rndm,:]])), axis=0)
-            # pop_d = cp_unique_axis0(pop_d)
-            repeats += 1
-        # # --------------------------------------------------------------------------
-        # # Replacing duplicates with random individuals from child_d_2
-        pop_d = cp_unique_axis0(pop_d)
-        repeats = 0
-        while pop_d.shape[0] < popsize:
-            if repeats >= popsize-1:
-                break
-            rndm = random.randint(0, popsize-1)
-            pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
-            # pop_d = cp_unique_axis0(pop_d)
-            repeats += 1
-        # --------------------------------------------------------------------------
-        # Replacing duplicates with random individuals from parent_d_1
-        pop_d = cp_unique_axis0(pop_d)
-        repeats = 0
-        while pop_d.shape[0] < popsize:
-            if repeats >= popsize-1:
-                break
-            rndm = random.randint(0, popsize-1)
-            pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
-            # pop_d = cp_unique_axis0(pop_d)
-            repeats += 1
-        # --------------------------------------------------------------------------
-        # Replacing duplicates with random individuals from parent_d_2
-        pop_d = cp_unique_axis0(pop_d)
-        repeats = 0
-        while pop_d.shape[0] < popsize:
-            if repeats >= popsize-1:
-                break
-            rndm = random.randint(0, popsize-1)
-            pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
-            # pop_d = cp_unique_axis0(pop_d)
-            repeats += 1
-        # # --------------------------------------------------------------------------
-        # x = np.insert(x, 0, count, axis=1)
-        # pop_d = cp.array(x)
 
         # --------------------------------------------------------------------------
-        # Picking best solution
+        # # # Replacing duplicates with random individuals from child_d_1
+        # pop_d = cp_unique_axis0(pop_d)
+        # repeats = 0
+        # while pop_d.shape[0] < popsize:
+        #     if repeats >= popsize-1:
+        #         break
+        #     rndm = random.randint(0, popsize-1)
+        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_1[rndm,:]])), axis=0)
+        #     # pop_d = cp_unique_axis0(pop_d)
+        #     repeats += 1
+        # # # --------------------------------------------------------------------------
+        # # # Replacing duplicates with random individuals from child_d_2
+        # pop_d = cp_unique_axis0(pop_d)
+        # repeats = 0
+        # while pop_d.shape[0] < popsize:
+        #     if repeats >= popsize-1:
+        #         break
+        #     rndm = random.randint(0, popsize-1)
+        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
+        #     # pop_d = cp_unique_axis0(pop_d)
+        #     repeats += 1
+        # # --------------------------------------------------------------------------
+        # # Replacing duplicates with random individuals from parent_d_1
+        # pop_d = cp_unique_axis0(pop_d)
+        # repeats = 0
+        # while pop_d.shape[0] < popsize:
+        #     if repeats >= popsize-1:
+        #         break
+        #     rndm = random.randint(0, popsize-1)
+        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
+        #     # pop_d = cp_unique_axis0(pop_d)
+        #     repeats += 1
+        # # --------------------------------------------------------------------------
+        # # Replacing duplicates with random individuals from parent_d_2
+        # pop_d = cp_unique_axis0(pop_d)
+        # repeats = 0
+        # while pop_d.shape[0] < popsize:
+        #     if repeats >= popsize-1:
+        #         break
+        #     rndm = random.randint(0, popsize-1)
+        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
+        #     # pop_d = cp_unique_axis0(pop_d)
+        #     repeats += 1
+        # # # --------------------------------------------------------------------------
+        # # x = np.insert(x, 0, count, axis=1)
+        # # pop_d = cp.array(x)
+
+        # # --------------------------------------------------------------------------
+        # # Picking best solution
         old_cost = minimum_cost
-        # best_sol = pop_d[0,:]
+
         best_sol = pop_d[pop_d[:,-1].argmin()]
         minimum_cost = best_sol[-1]
         
