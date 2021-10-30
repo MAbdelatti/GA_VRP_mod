@@ -2,8 +2,8 @@
           NONE MISSING
           NONE REPEATED
           CAPACITY VALID
-          -------------  EQUAL  -------------
-          GA solution: 159950
-          Exact solution: 159950.43238291555
-          Rounded solution: 159950.0
+          -------------  NOT EQUAL !!!  -------------
+          GA solution: 5008
+          Exact solution: 160263.355447596
+          Rounded solution: 160266.0
 

@@ -12,7 +12,6 @@ from datetime import datetime
 import shutil
 import gpuGrid
 import val
-import time
 # -------- End of the importing part -----------
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -32,9 +31,6 @@ def readInput():
     vrpManager = vrp()
     # First reading the VRP from the input #
     print('Reading data file...', end=' ')
-    # text_out = open('1000.out', 'a')
-    # print('Reading data file...', end=' ', file=text_out)
-    # text_out.close()
     fo = open(sys.argv[1],"r")
     lines = fo.readlines()
     for i, line in enumerate(lines):       
@@ -49,17 +45,11 @@ def readInput():
                         vrpManager.opt = float(inputs[-1][:-1])
                     except:
                         print('\nNo optimal value detected, taking optimal as 0.0')
-                        # text_out = open('1000.out', 'a')
-                        # print('\nNo optimal value detected, taking optimal as 0.0', file=text_out)
-                        # text_out.close()
                         vrpManager.opt = 0.0
                     break
             else:
                 vrpManager.opt = np.int32(sys.argv[3])
                 print('\nManual optimal value entered: %d'%vrpManager.opt)
-                # text_out = open('1000.out', 'a')
-                # print('\nManual optimal value entered: %d'%vrpManager.opt, file=text_out)
-                # text_out.close()
                 break
 
         # Validating positive non-zero capacity
@@ -79,9 +69,6 @@ def readInput():
 			# Validating positive non-zero capacity
             if vrpManager.capacity <= 0:
                 print(sys.stderr, 'Invalid input: capacity must be neither negative nor zero!')
-                # text_out = open('1000.out', 'a')
-                # print(sys.stderr, 'Invalid input: capacity must be neither negative nor zero!', file=text_out)
-                # text_out.close()
                 exit(1)
             break       
         while line.upper().startswith('NODE_COORD_SECTION'):
@@ -90,7 +77,7 @@ def readInput():
             while not (line.upper().startswith('DEMAND_SECTION') or line=='\n'):
                 inputs = line.split()
                 vrpManager.addNode(np.int16(inputs[0]), 0.0, np.float32(inputs[1]), np.float32((inputs[2])))
-                # print(vrpManager.nodes)
+
                 i += 1
                 line = lines[i]
                 while (line=='\n'):
@@ -106,18 +93,10 @@ def readInput():
                         if float(inputs[1]) > vrpManager.capacity:
                             print(sys.stderr,
 							'Invalid input: the demand of the node %s is greater than the vehicle capacity!' % vrpManager.nodes[0])
-                            # text_out = open('1000.out', 'a')
-                            # print(sys.stderr,
-							# 'Invalid input: the demand of the node %s is greater than the vehicle capacity!' % vrpManager.nodes[0], file=text_out)
-                            # text_out.close()
                             exit(1)
                         if float(inputs[1]) < 0:
                             print(sys.stderr,
                             'Invalid input: the demand of the node %s cannot be negative!' % vrpManager.nodes[0])
-                            # text_out = open('1000.out', 'a')
-                            # print(sys.stderr,
-                            # 'Invalid input: the demand of the node %s cannot be negative!' % vrpManager.nodes[0], file=text_out)
-                            # text_out.close()
                             exit(1)                            
                         vrpManager.nodes[int(inputs[0])][1] =  float(inputs[1])
                         i += 1
@@ -129,13 +108,9 @@ def readInput():
                         if line.upper().startswith('DEPOT_SECTION'):
                             vrpManager.nodes = np.delete(vrpManager.nodes, 0, 0) 
                             print('Done.')
-                            # text_out = open('1000.out', 'a')                         
-                            # print('Done.', file=text_out)
-                            # text_out.close()
                             return(vrpManager.capacity, vrpManager.nodes, vrpManager.opt)
-# ------------------------- End of reading the input data file ------------------------------------
 
-# ------------------------- Start calculating the cost table --------------------------------------
+# ------------------------- Calculating the cost table --------------------------------------
 @cuda.jit
 def calculateLinearizedCost(data_d, popsize, linear_cost_table):
     threadId_row, threadId_col = cuda.grid(2)
@@ -148,38 +123,7 @@ def calculateLinearizedCost(data_d, popsize, linear_cost_table):
                 linear_cost_table[k] = \
                 round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))
 
-@cuda.jit
-def calc_cost_gpu(data_d, popsize, vrp_capacity, cost_table_d):
-    threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
-    
-    for row in range(threadId_row, data_d.shape[0], stride_x):
-        for col in range(threadId_col, data_d.shape[0], stride_y):
-            cost_table_d[row, col] = \
-            round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))
-
-# ------------------------- End calculating the cost table ----------------------------------------
-
-# ------------------------- Start fitness calculation ---------------------------------------------
-@cuda.jit
-def fitness_gpu_2D(cost_table_d, pop):
-    threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
-
-    for row in range(threadId_row, pop.shape[0], stride_x):
-        fitnessValue = 0
-        pop[row, -1] = 1
-        
-        if threadId_col == 15:
-            for i in range(pop.shape[1]-2):
-                fitnessValue += \
-                (cost_table_d[pop[row, i]-1, pop[row, i+1]-1])
-
-            #scaledFitness = fitnessValue >> (floor(log(fitnessValue, 2.0))+1-16) # Scaling the fitness to fit int16
-            pop[row, -1]  = fitnessValue
-    
-    cuda.syncthreads()
-
+# ------------------------- Fitness calculation ---------------------------------------------
 @cuda.jit
 def fitness_gpu(linear_cost_table, pop, n):
     threadId_row, threadId_col = cuda.grid(2)
@@ -190,38 +134,22 @@ def fitness_gpu(linear_cost_table, pop, n):
         pop[row, -1] = 1
         
         if threadId_col == 15:
-            for idx in range(pop.shape[1]-2):
-                i             = min(pop[row, idx]-1, pop[row, idx+1]-1)
-                j             = max(pop[row, idx]-1, pop[row, idx+1]-1)
+            for idx in range(1, pop.shape[1]-2):
+                i = min(pop[row, idx]-1, pop[row, idx+1]-1)
+                j = max(pop[row, idx]-1, pop[row, idx+1]-1)
 
                 if i != j:
                     k = int(j - (i*(0.5*i - n + 1.5)) - 1)
                     fitnessValue += linear_cost_table[k]
 
-            #scaledFitness = fitnessValue >> (floor(log(fitnessValue, 2.0))+1-16) # Scaling the fitness to fit int16
-            pop[row, -1]  = fitnessValue
+            bit_count = int((log(fitnessValue) /  log(2)) + 1)
+            scaledFitness = fitnessValue >> 5 # Scaling the fitness to fit int16
+            # scaledFitness = fitnessValue >> bit_count - 16 # Scaling the fitness to fit int16
+            pop[row, -1]  = scaledFitness
     
     cuda.syncthreads()
 
-# @cuda.jit
-# def fitness_gpu_new(cost_table_d, pop, fitness_val_d):
-#     threadId_row, threadId_col = cuda.grid(2)
-#     stride_x, stride_y = cuda.gridsize(2)
-  
-#     if threadId_row < pop.shape[0]:
-#         fitness_val_d[threadId_row, 0] = 0
-#         pop[threadId_row, -1] = 1
-                
-#         for col in range(threadId_col, pop.shape[1]-2, stride_y):
-#             if col > 0:
-#                 cuda.atomic.add(fitness_val_d, (threadId_row, 0), cost_table_d[pop[threadId_row, col]-1, pop[threadId_row, col+1]-1])
-
-#         pop[threadId_row, -1] = fitness_val_d[threadId_row,0]
-    
-#     cuda.syncthreads()
-# ------------------------- End fitness calculation ---------------------------------------------
-
-# ------------------------- Start adjusting individuals ---------------------------------------------
+# ------------------------- Refining solutions ---------------------------------------------
 @cuda.jit
 def find_duplicates(pop, r_flag):
     
@@ -322,7 +250,6 @@ def cleanup_r_flag(r_flag, pop):
                 pop[row, col] = 1
     
     cuda.syncthreads()
-# ------------------------- End adjusting individuals ---------------------------------------------
 
 # ------------------------- Start initializing individuals ----------------------------------------
 @cuda.jit
@@ -418,9 +345,7 @@ def two_opt(pop, cost_table, candid_d_3, n):
                     
                     for idx_k in range(0, route_length):
                         pop[row, col+idx_k] = candid_d_3[row, col+idx_k]
-# ------------------------- End two-opt calculations --------------------------------------------
 
-# ------------------------- Start evolution process ---------------------------------------------
 # --------------------------------- Cross Over part ---------------------------------------------
 @cuda.jit
 def select_candidates(pop_d, random_arr_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, assign_child_1):
@@ -450,15 +375,14 @@ def select_parents(pop_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent
     stride_x, stride_y = cuda.gridsize(2)
 
     for row in range(threadId_row, pop_d.shape[0], stride_x):
-        for col in range(threadId_col, pop_d.shape[1], stride_y):
-        # Selecting 2 parents with binary tournament   
-        # ----------------------------1st Parent--------------------------------------------------            
+        for col in range(threadId_col, pop_d.shape[1], stride_y):  
+            # ----------------------------Selecting 1st Parent from binary tournament----------------------------
             if candid_d_1[row, -1] < candid_d_2[row, -1]:
                 parent_d_1[row, col] = candid_d_1[row, col]
             else:
                 parent_d_1[row, col] = candid_d_2[row, col]
 
-            # ----------------------------2nd Parent--------------------------------------------------
+            # ----------------------------Selecting 2nd Parent from binary tournament----------------------------
             if candid_d_3[row, -1] < candid_d_4[row, -1]:
                 parent_d_2[row, col] = candid_d_3[row, col]
             else:
@@ -494,7 +418,6 @@ def number_cut_points(candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1
 
             # Number of cutting points = (n/5 - 2)
             candid_d_1[row, 4] = candid_d_1[row, 3]//20 - 2
-            # n_points = max(min_n, (count%(max_n*4000))//4000) # the n_points increases one every 5000 iterations till 20 then resets to 2 and so on
             candid_d_1[row, 4] = 2 # n_points is replaced by 2 for 2-point crossover
     cuda.syncthreads()
 
@@ -513,12 +436,9 @@ def add_cut_points(candid_d_1, candid_d_2, rng_states):
             # Generate unique random numbers as cut indices:
                 for j in range(1, no_cuts+1):
                     while rnd_val == 0 or rnd_val == candid_d_2[row, j]:
-                        # rnd = xoroshiro128p_uniform_float32(rng_states, row)\
-                        #       *(candid_d_1[row, 3] - 2) + 2 # random*(max-min)+min
                         rnd = xoroshiro128p_uniform_float32(rng_states, row*candid_d_1.shape[1])\
                             *(candid_d_1[row, 3] - 2) + 2 # random*(max-min)+min
-                        # rnd = xoroshiro128p_normal_float32(rng_states, row*candid_d_1.shape[1])\
-                        #       *(candid_d_1[row, 3] - 2) + 2 # random*(max-min)+min
+                        
                         rnd_val = int(rnd)+2            
                 
                 candid_d_2[row, i+1] = rnd_val
@@ -576,6 +496,7 @@ def cross_over_gpu(random_arr, candid_d_1, candid_d_2, child_d_1, child_d_2, par
                                 child_d_2[row, col], child_d_1[row, col]
 
     cuda.syncthreads()
+
 # ------------------------------------Mutation part -----------------------------------------------
 @cuda.jit
 def mutate(rng_states, child_d_1, child_d_2, mutation_prob):    
@@ -585,35 +506,24 @@ def mutate(rng_states, child_d_1, child_d_2, mutation_prob):
     for row in range(threadId_row, child_d_1.shape[0], stride_x):    
     # Swap two positions in the children, with 0.3 probability
         if threadId_col == 15:
-            # mutation_prob = 30
-            
-            # rnd = xoroshiro128p_uniform_float32(rng_states, row)\
-            #       *(mutation_prob - 1) + 1 # random*(max-min)+min
             rnd = xoroshiro128p_uniform_float32(rng_states, row*child_d_1.shape[1])*99 # random*(max-min)+min
-            # rnd = xoroshiro128p_normal_float32(rng_states, row*child_d_1.shape[1])\
-            #       *(mutation_prob - 1) + 1 # random*(max-min)+min
+            
             rnd_val = int(rnd)+2
             if rnd_val <= mutation_prob: # Mutation operator of (mutation_prob%)
                 i1 = 1
                 
                 # Repeat random selection if depot was selected:
                 while child_d_1[row, i1] == 1 or i1 >= child_d_1.shape[1]-1:
-                    # rnd = xoroshiro128p_uniform_float32(rng_states, row)\
-                    #       *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
                     rnd = xoroshiro128p_uniform_float32(rng_states, row*child_d_1.shape[1])\
                         *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
-                    # rnd = xoroshiro128p_normal_float32(rng_states, row*child_d_1.shape[1])\
-                    #     *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
+                    
                     i1 = int(rnd)+2        
 
                 i2 = 1
                 while child_d_1[row, i2] == 1 or i2 >= child_d_1.shape[1]-1:
-                    # rnd = xoroshiro128p_uniform_float32(rng_states, row)\
-                    #     *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
                     rnd = xoroshiro128p_uniform_float32(rng_states, row*child_d_1.shape[1])\
                         *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
-                    # rnd = xoroshiro128p_normal_float32(rng_states, row*child_d_1.shape[1])\
-                    #     *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
+                    
                     i2 = int(rnd)+2 
                     
                 child_d_1[row, i1], child_d_1[row, i2] = \
@@ -624,28 +534,38 @@ def mutate(rng_states, child_d_1, child_d_2, mutation_prob):
                 
                 # Repeat random selection if depot was selected:
                 while child_d_2[row, i1] == 1 or i1 >= child_d_2.shape[1]-1:
-                    # rnd = xoroshiro128p_uniform_float32(rng_states, row)\
-                    #     *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
                     rnd = xoroshiro128p_uniform_float32(rng_states, row*child_d_2.shape[1])\
                         *(child_d_2.shape[1] - 4) + 2 # random*(max-min)+min
-                    # rnd = xoroshiro128p_normal_float32(rng_states, row*child_d_2.shape[1])\
-                    #     *(child_d_2.shape[1] - 4) + 2 # random*(max-min)+min
+
                     i1 = int(rnd)+2        
 
                 i2 = 1
                 while child_d_2[row, i2] == 1 or i2 >= child_d_2.shape[1]-1:
-                    # rnd = xoroshiro128p_uniform_float32(rng_states, row)\
-                    #     *(child_d_1.shape[1] - 4) + 2 # random*(max-min)+min
                     rnd = xoroshiro128p_uniform_float32(rng_states, row*child_d_2.shape[1])\
                         *(child_d_2.shape[1] - 4) + 2 # random*(max-min)+min
-                    # rnd = xoroshiro128p_normal_float32(rng_states, row*child_d_2.shape[1])\
-                    #     *(child_d_2.shape[1] - 4) + 2 # random*(max-min)+min
+                   
                     i2 = int(rnd)+2 
                     
                 child_d_2[row, i1], child_d_1[row, i2] = \
                 child_d_2[row, i2], child_d_1[row, i1]
             
         cuda.syncthreads()
+
+@cuda.jit
+def inverse_mutate(random_min_max, pop, random_arr, mutation_prob):
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y = cuda.gridsize(2)
+    
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        if random_arr[row,0] <= mutation_prob:
+            for col in range(threadId_col, pop.shape[1], stride_y):
+                start  = random_min_max[row, 0]
+                ending = random_min_max[row, 1]
+                length = ending - start
+                diff   = col - start
+                if col >= start and col < start+ceil(length/2):
+                    pop[row, col], pop[row, ending-diff] = pop[row, ending-diff], pop[row, col]
+
 # -------------------------- Update population part -----------------------------------------------
 @cuda.jit
 def select_individual(index, pop_d, individual):
@@ -692,21 +612,6 @@ def update_pop(count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d):
                 pop_d[row, 0] = count
                 
     cuda.syncthreads()
-# ------------------------- Mutation Fucntion --------------------------------------------------------
-@cuda.jit
-def inverse_mutate(random_min_max, pop, random_arr, mutation_prob):
-    threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
-    
-    for row in range(threadId_row, pop.shape[0], stride_x):
-        if random_arr[row,0] <= mutation_prob:
-            for col in range(threadId_col, pop.shape[1], stride_y):
-                start  = random_min_max[row, 0]
-                ending = random_min_max[row, 1]
-                length = ending - start
-                diff   = col - start
-                if col >= start and col < start+ceil(length/2):
-                    pop[row, col], pop[row, ending-diff] = pop[row, ending-diff], pop[row, col]
 
 # ------------------------- Definition of CPU functions ----------------------------------------------   
 def select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize):
@@ -751,7 +656,7 @@ def nCr(n,r):
     f = np.math.factorial
     return int(f(n) / (f(r) * f(n-r)))
 
-# ------------------------- Start Main ------------------------------------------------------------
+# ------------------------- Main Function ------------------------------------------------------------
 try:
     vrp_capacity, data, opt = readInput()
     n = int(sys.argv[4])
@@ -759,11 +664,8 @@ try:
     mutation_prob = int(sys.argv[6])
     popsize = -(-(n*(data.shape[0] - 1))//1000)*1000
     
-    # popsize = 500
     print('Taking population size {}*number of nodes'.format(n))
-    # text_out = open('1000.out', 'a')
-    # print('Taking population size {}*number of nodes'.format(n),file=text_out)
-    # text_out.close()
+    
     min_n = 1 # Minimum number of crossover points
     max_n = 1 # Maximum number of crossover points
 
@@ -771,27 +673,19 @@ try:
         generations = int(sys.argv[2])
     except:
         print('No generation limit provided, taking 2000 generations...')
-        # text_out = open('1000.out', 'a')
-        # print('No generation limit provided, taking 2000 generations...', file=text_out)
-        # text_out.close()
         generations = 2000
 
-    r_flag = 9999 # A flag for removal/replacement
-
+    r_flag       = 9999 # A flag for removal/replacement
     data_d       = cuda.to_device(data)
-    # cost_table_d = cuda.device_array(shape=(data.shape[0], data.shape[0]), dtype=np.int32)
 
     # Linear upper triangle of cost table (width=nC2))    
-    linear_cost_table = cp.zeros((nCr(data.shape[0], 2)), dtype=np.int32)
+    linear_cost_table = cp.zeros((nCr(data.shape[0], 2)), dtype=np.int16)
 
-    pop_d = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int32)
+    pop_d = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int16)
 
-    missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int32)
+    missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int16)
     missing_elements = cp.ones(shape=(popsize,1), dtype=bool)
     
-    # fitness_val   = np.zeros(shape=(popsize,1), dtype=np.int32)
-    # fitness_val_d = cuda.to_device(fitness_val)
-
     # GPU grid configurations:
     grid      = gpuGrid.GRID()
     blocks_x, blocks_y = grid.blockAlloc(data.shape[0], float(n))
@@ -799,7 +693,6 @@ try:
 
     print(grid)
     blocks            = (blocks_x, blocks_y)
-    # blocks            = (5, 5)
     threads_per_block = (tpb_x, tpb_y)   
 
     val = val.VRP(sys.argv[1], data.shape[0])
@@ -828,7 +721,7 @@ try:
 
     # calc_cost_gpu[blocks, threads_per_block](data_d, popsize, vrp_capacity, cost_table_d)
 
-    # linearized_table = np.zeros((nCr(data.shape[0], 2)), dtype=np.int32)
+    # linearized_table = np.zeros((nCr(data.shape[0], 2)), dtype=np.int16)
     
     # ------------------Validating the linearized cost table--------------------------------
     # d = cost_table_d.copy_to_host()
@@ -857,7 +750,6 @@ try:
     cleanup_r_flag[blocks, threads_per_block](r_flag, pop_d)
 
     # --------------Calculate fitness----------------------------------------------
-    # fitness_gpu[blocks, threads_per_block](cost_table_d, pop_d)
     fitness_gpu[blocks, threads_per_block](linear_cost_table, pop_d, data_d.shape[0])
     # -------------------------------------------------------------------------------------
     pop_d = pop_d[pop_d[:,-1].argsort()] # Sort the population to get the best later
@@ -866,18 +758,18 @@ try:
 
     # --------------Evolve population for some generations----------------------------------------------
     # Create the pool of 6 arrays of the same length
-    candid_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    candid_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    candid_d_3 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    candid_d_4 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    candid_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_3 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_4 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
 
-    parent_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    parent_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    parent_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    parent_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
 
-    child_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
-    child_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    child_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    child_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
 
-    cut_idx = np.ones(shape=(pop_d.shape[1]), dtype=np.int32)
+    cut_idx = np.ones(shape=(pop_d.shape[1]), dtype=np.int16)
     cut_idx_d = cuda.to_device(cut_idx)
 
     minimum_cost = float('Inf')
@@ -887,7 +779,6 @@ try:
     count_index = 0
     best_sol = 0
     assign_child_1 = False
-    last_shuffle = 10000
     total_time = 0.0
     time_per_loop = 0.0
     while count <= generations:
@@ -922,6 +813,7 @@ try:
         # Performing mutation
         rng_states = create_xoroshiro128p_states(popsize*child_d_1.shape[1], seed=random.randint(2,2*10**5))
         # mutate[blocks, threads_per_block](rng_states, child_d_1, child_d_2, mutation_prob)
+
         random_min_max = cp.random.randint(2, pop_d.shape[1]-2, (popsize, 2))
         random_min_max.sort()
         random_arr = cp.random.randint(1, 100, (popsize, 1))
@@ -931,8 +823,6 @@ try:
         random_min_max.sort()
         random_arr = cp.random.randint(1, 100, (popsize, 1))
         inverse_mutate[blocks, threads_per_block](random_min_max, child_d_2, random_arr, mutation_prob)
-#        inverse_mutate(child_d_1, popsize, mutation_prob)
-#        inverse_mutate(child_d_2, popsize, mutation_prob)
         
         # Adjusting child_1 array
         find_duplicates[blocks, threads_per_block](child_d_1, r_flag)
@@ -975,55 +865,8 @@ try:
         select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize)
 
         # --------------------------------------------------------------------------
-        # # # Replacing duplicates with random individuals from child_d_1
-        # pop_d = cp_unique_axis0(pop_d)
-        # repeats = 0
-        # while pop_d.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-        #     rndm = random.randint(0, popsize-1)
-        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_1[rndm,:]])), axis=0)
-        #     # pop_d = cp_unique_axis0(pop_d)
-        #     repeats += 1
-        # # # --------------------------------------------------------------------------
-        # # # Replacing duplicates with random individuals from child_d_2
-        # pop_d = cp_unique_axis0(pop_d)
-        # repeats = 0
-        # while pop_d.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-        #     rndm = random.randint(0, popsize-1)
-        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
-        #     # pop_d = cp_unique_axis0(pop_d)
-        #     repeats += 1
-        # # --------------------------------------------------------------------------
-        # # Replacing duplicates with random individuals from parent_d_1
-        # pop_d = cp_unique_axis0(pop_d)
-        # repeats = 0
-        # while pop_d.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-        #     rndm = random.randint(0, popsize-1)
-        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
-        #     # pop_d = cp_unique_axis0(pop_d)
-        #     repeats += 1
-        # # --------------------------------------------------------------------------
-        # # Replacing duplicates with random individuals from parent_d_2
-        # pop_d = cp_unique_axis0(pop_d)
-        # repeats = 0
-        # while pop_d.shape[0] < popsize:
-        #     if repeats >= popsize-1:
-        #         break
-        #     rndm = random.randint(0, popsize-1)
-        #     pop_d = cp.concatenate((pop_d, cp.array([child_d_2[rndm,:]])), axis=0)       
-        #     # pop_d = cp_unique_axis0(pop_d)
-        #     repeats += 1
-        # # # --------------------------------------------------------------------------
-        # # x = np.insert(x, 0, count, axis=1)
-        # # pop_d = cp.array(x)
-
-        # # --------------------------------------------------------------------------
-        # # Picking best solution
+        
+        # Picking best solution
         old_cost = minimum_cost
 
         best_sol = pop_d[pop_d[:,-1].argmin()]
@@ -1042,55 +885,15 @@ try:
 
         # Shuffle the population after a certain number of generations without improvement 
         assign_child_1 = False
-        # if count_index >= 5000 and count%last_shuffle == 0:
-        #     last_shuffle *= 2.5
-        #     count_index = 0
-        #     r = 1
-        #     #r = random.randint(1, 2)     
-        #     print('\nCaught possible early convergence (%d)'%r)
-        #     print('Shuffling population\n')
-        #     pop_d[0,:] = pop_d[pop_d[:,-1].argmin()]
-
-        #     for individual in pop_d[1:,:]:
-        #         cp.random.shuffle(individual[2:-1])
-            
-        #     assign_child_1 = True # Force child 1 to participate in every cross over after shuffling
-            
-        #     # Adjust population after shuffling       
-        #     find_duplicates[blocks, threads_per_block](pop_d, r_flag)
-
-        #     find_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, pop_d)
-            
-        #     add_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, pop_d)
-
-        #     shift_r_flag[blocks, threads_per_block](r_flag, vrp_capacity, data_d, pop_d)
-
-        #     cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, pop_d)
-
-        #     cleanup_r_flag[blocks, threads_per_block](r_flag, pop_d)
 
         if count == 1:
             print('At first generation, Best: %d,'%minimum_cost, 'Worst: %d'%worst_cost, \
                 'delta: %d'%delta, 'Avg: %.2f'%average)
 
-            # text_out = open('1000.out', 'a')
-            # print('At first generation, Best: %d,'%minimum_cost, 'Worst: %d'%worst_cost, \
-            #     'delta: %d'%delta, 'Avg: %.2f'%average, file=text_out)
-            # text_out.close()
         elif (count+1)%100 == 0:
             print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
                 'delta: %d'%delta, 'Avg: %.2f'%average)
-            # text_out = open('1000.out', 'a')
-            # print('After %d generations, Best: %d,'%(count+1, minimum_cost), 'Worst: %d'%worst_cost, \
-            #     'delta: %d'%delta, 'Avg: %.2f'%average, file=text_out)
-            # text_out.close()
         
-        # if (count+1)%10000 == 0:
-        #     print('\nProblem {}, best solution so far is:\n{}'.format(sys.argv[1], best_sol))
-        #     text_out = open('1000.out', 'a')
-        #     print('\nProblem {}, best solution so far is:\n{}'.format(sys.argv[1], best_sol), file=text_out)
-        #     text_out.close()
-
         count += 1
 
     current_time = timer()
