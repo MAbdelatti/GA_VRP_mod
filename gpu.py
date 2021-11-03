@@ -12,6 +12,7 @@ from datetime import datetime
 import shutil
 import gpuGrid
 import val
+import time
 # -------- End of the importing part -----------
 np.set_printoptions(threshold=sys.maxsize)
 
@@ -112,9 +113,9 @@ def readInput():
 
 # ------------------------- Calculating the cost table --------------------------------------
 @cuda.jit
-def calculateLinearizedCost(data_d, popsize, linear_cost_table):
+def calculateLinearizedCost(data_d, linear_cost_table):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
     
     for row in range(threadId_row, data_d.shape[0], stride_x):
         for col in range(threadId_col, data_d.shape[0], stride_y):
@@ -125,9 +126,9 @@ def calculateLinearizedCost(data_d, popsize, linear_cost_table):
 
 # ------------------------- Fitness calculation ---------------------------------------------
 @cuda.jit
-def fitness_gpu(linear_cost_table, pop, n):
+def fitness_gpu_old(linear_cost_table, pop, n):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):
         fitnessValue = 0
@@ -142,19 +143,33 @@ def fitness_gpu(linear_cost_table, pop, n):
                     k = int(j - (i*(0.5*i - n + 1.5)) - 1)
                     fitnessValue += linear_cost_table[k]
 
-            bit_count = int((log(fitnessValue) /  log(2)) + 1)
-            scaledFitness = fitnessValue >> 5 # Scaling the fitness to fit int16
+            # bit_count     = int((log(fitnessValue) /  log(2)) + 1)
+            scaledFitness = fitnessValue  # Scaling the fitness to fit int16
             # scaledFitness = fitnessValue >> bit_count - 16 # Scaling the fitness to fit int16
             pop[row, -1]  = scaledFitness
     
     cuda.syncthreads()
 
+@cuda.jit
+def fitness_gpu(linear_cost_table, pop, n):
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        for col in range(threadId_col, pop.shape[1]-2, stride_y):
+            i = min(pop[row, col]-1, pop[row, col+1]-1)
+            j = max(pop[row, col]-1, pop[row, col+1]-1)
+
+            if i != j:
+                k = int(j - (i*(0.5*i - n + 1.5)) - 1)
+
+                cuda.atomic.add(pop, (row, pop.shape[1]-1), linear_cost_table[k])
+   
 # ------------------------- Refining solutions ---------------------------------------------
 @cuda.jit
-def find_duplicates(pop, r_flag):
-    
+def find_duplicates_old(pop, r_flag):    
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):
         if threadId_col == 15:
@@ -163,25 +178,11 @@ def find_duplicates(pop, r_flag):
                 for j in range(i, pop.shape[1]-1):
                     if pop[row, i] != r_flag and pop[row, j] == pop[row, i] and i != j:
                         pop[row, j] = r_flag
-@cuda.jit
-def shift_r_flag(r_flag, vrp_capacity, data_d, pop):
-    threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
 
-    for row in range(threadId_row, pop.shape[0], stride_x):
-        if threadId_col == 15:           
-            # Shift all r_flag values to the end of the list:        
-            for i in range(2, pop.shape[1]-2):
-                if pop[row,i] == r_flag:
-                    k = i
-                    while pop[row,k] == r_flag:
-                        k += 1
-                    if k < pop.shape[1]-1:
-                        pop[row,i], pop[row,k] = pop[row,k], pop[row,i]
 @cuda.jit
-def find_missing_nodes(r_flag, data_d, missing_d, pop):    
+def find_missing_nodes_old(data_d, missing_d, pop):    
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):    
         if threadId_col == 15:
@@ -193,12 +194,12 @@ def find_missing_nodes(r_flag, data_d, missing_d, pop):
                         missing_d[row, i] = 0
                         break
                     else:
-                        missing_d[row, i] = data_d[i,0]
+                        missing_d[row, i] = data_d[i,0]                  
 
 @cuda.jit
-def add_missing_nodes(r_flag, data_d, missing_d, pop):   
+def add_missing_nodes_old(missing_d, pop, r_flag):   
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):       
         if threadId_col == 15:           
@@ -207,11 +208,80 @@ def add_missing_nodes(r_flag, data_d, missing_d, pop):
                 for l in range(2, pop.shape[1]-1):
                     if missing_d[row, k] != 0 and pop[row, l] == r_flag:
                         pop[row, l] = missing_d[row, k]
+                        break                        
+
+@cuda.jit
+def find_duplicates(pop, r_flag):    
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        for col in range(threadId_col, pop.shape[1]-1, stride_y): 
+            if col >= 2:
+                for j in range(col+1, pop.shape[1]-1):
+                    if pop[row, col] != r_flag and pop[row, j] == pop[row, col]:
+                        pop[row, j] = r_flag                        
+
+@cuda.jit
+def find_missing_nodes(data_d, missing_d, pop):    
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        for col in range(threadId_col, data_d.shape[0], stride_y):
+            missing_d[row, col] = 0
+            found = False
+            for j in range(2, pop.shape[1]-1):
+                if data_d[col, 0] == pop[row, j]:
+                    found = True
+                    break
+            if not found:
+                missing_d[row, col] = data_d[col,0]
+
+@cuda.jit
+def add_missing_nodes(missing_d, pop, r_flag):   
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        for col in range(threadId_col, missing_d.shape[1], stride_y):
+            if missing_d[row, col] != 0:
+                for j in range(1, pop.shape[1]-2):
+                    cuda.atomic.compare_and_swap(pop[row,j:], r_flag, missing_d[row, col])
+                    if pop[row, j] == missing_d[row, col]:
                         break
+
+@cuda.jit
+def shift_r_flag_old(r_flag, pop):
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        if threadId_col == 15:           
+            # Shift all r_flag values to the end of the list:        
+            for i in range(2, pop.shape[1]-2):
+                if pop[row,i] == r_flag:
+                    k = i
+                    while pop[row,k] == r_flag:
+                        k += 1
+                    if k < pop.shape[1]-1:
+                        pop[row,i], pop[row,k] = pop[row,k], pop[row,i]
+
+@cuda.jit
+def shift_r_flag(r_flag, pop):
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, pop.shape[0], stride_x):
+        for col in range(threadId_col, pop.shape[1], stride_y):
+            if pop[row, col] == r_flag:
+                pop[row, col] = 1
+                                 
+
 @cuda.jit
 def cap_adjust(r_flag, vrp_capacity, data_d, pop):    
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):    
         if threadId_col == 15:
@@ -242,57 +312,40 @@ def cap_adjust(r_flag, vrp_capacity, data_d, pop):
 @cuda.jit
 def cleanup_r_flag(r_flag, pop):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):
         for col in range(threadId_col, pop.shape[1], stride_y):
             if pop[row, col] == r_flag:
                 pop[row, col] = 1
     
-    cuda.syncthreads()
-
 # ------------------------- Start initializing individuals ----------------------------------------
 @cuda.jit
-def initializePop_gpu(rng_states, data_d, missing_d, pop_d):    
+def initializePop_gpu(data_d, pop_d):    
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
-
-    for row in range(threadId_row, pop_d.shape[0], stride_x):
+    stride_x, stride_y         = cuda.gridsize(2)
+    
     # Generate the individuals from the nodes in data_d:
+    for row in range(threadId_row, pop_d.shape[0], stride_x):
         for col in range(threadId_col, data_d.shape[0]+1, stride_y):
             pop_d[row, col] = data_d[col-1, 0]
         
         pop_d[row, 0], pop_d[row, 1] = 1, 1
         
-    # # Randomly shuffle each individual on a separate thread:      
-    # if threadId_row < pop_d.shape[0] and threadId_col > 1:
-    #     for col in range(threadId_col, data_d.shape[0]+1, stride_y):
-    #         rnd_col = 0
-    #         while rnd_col == 0:
-    #             # rnd = (xoroshiro128p_uniform_float32(rng_states, threadId_row*threadId_col)*(data_d.shape[0]-2))
-    #             # To convert from row-column indexing to linear scalars, we use: col + row*array_width (i.e., array.shape[1])
-    #             rnd = xoroshiro128p_uniform_float32(rng_states, col+(threadId_row*pop_d.shape[1]))*(data_d.shape[0]-2)
-    #             rnd_col = int(rnd)+2
-
-    #     pop_d[threadId_row, col], pop_d[threadId_row, rnd_col] =\
-    #     pop_d[threadId_row, rnd_col], pop_d[threadId_row, col]
-# ------------------------- End initializing individuals ------------------------------------------
-
 # ------------------------- Start two-opt calculations --------------------------------------------
 @cuda.jit
 def reset_to_ones(pop):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):    
         for col in range(threadId_col, pop.shape[1], stride_y):
             pop[row, col] = 1   
-    cuda.syncthreads()
     
 @cuda.jit
 def two_opt(pop, cost_table, candid_d_3, n):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):    
         for col in range(threadId_col, pop.shape[1], stride_y):
@@ -350,7 +403,7 @@ def two_opt(pop, cost_table, candid_d_3, n):
 @cuda.jit
 def select_candidates(pop_d, random_arr_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, assign_child_1):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop_d.shape[0], stride_x):    
         for col in range(threadId_col, pop_d.shape[1], stride_y):
@@ -372,17 +425,17 @@ def select_candidates(pop_d, random_arr_d, candid_d_1, candid_d_2, candid_d_3, c
 @cuda.jit  
 def select_parents(pop_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1, parent_d_2):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop_d.shape[0], stride_x):
         for col in range(threadId_col, pop_d.shape[1], stride_y):  
-            # ----------------------------Selecting 1st Parent from binary tournament----------------------------
+            # Selecting 1st Parent from binary tournament:
             if candid_d_1[row, -1] < candid_d_2[row, -1]:
                 parent_d_1[row, col] = candid_d_1[row, col]
             else:
                 parent_d_1[row, col] = candid_d_2[row, col]
 
-            # ----------------------------Selecting 2nd Parent from binary tournament----------------------------
+            # Selecting 2nd Parent from binary tournament:
             if candid_d_3[row, -1] < candid_d_4[row, -1]:
                 parent_d_2[row, col] = candid_d_3[row, col]
             else:
@@ -391,10 +444,10 @@ def select_parents(pop_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent
     cuda.syncthreads()
 
 @cuda.jit
-def number_cut_points(candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1, parent_d_2, count, min_n, max_n):
+def number_cut_points(candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1, parent_d_2):
     
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, candid_d_1.shape[0], stride_x):
         for col in range(threadId_col, candid_d_1.shape[1], stride_y):
@@ -416,15 +469,13 @@ def number_cut_points(candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1
             candid_d_1[row, 3] = \
             min(candid_d_1[row, 2], candid_d_2[row, 2]) 
 
-            # Number of cutting points = (n/5 - 2)
-            candid_d_1[row, 4] = candid_d_1[row, 3]//20 - 2
-            candid_d_1[row, 4] = 2 # n_points is replaced by 2 for 2-point crossover
+            candid_d_1[row, 4] = 1 # 1-point crossover
     cuda.syncthreads()
 
 @cuda.jit
 def add_cut_points(candid_d_1, candid_d_2, rng_states):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, candid_d_1.shape[0], stride_x):    
         if threadId_col == 15:
@@ -444,27 +495,25 @@ def add_cut_points(candid_d_1, candid_d_2, rng_states):
                 candid_d_2[row, i+1] = rnd_val
                 
             # Sorting the crossover points:
-            if threadId_col == 15: # Really! it is already up there! see the main if statement.
-                for i in range(2, no_cuts+2):
-                    min_val = candid_d_2[row, i]
-                    min_index = i
+            for i in range(2, no_cuts+2):
+                min_val = candid_d_2[row, i]
+                min_index = i
 
-                    for j in range(i + 1, no_cuts+2):
-                        # Select the smallest value
-                        if candid_d_2[row, j] < candid_d_2[row, min_index]:
-                            min_index = j
+                for j in range(i + 1, no_cuts+2):
+                    # Select the smallest value
+                    if candid_d_2[row, j] < candid_d_2[row, min_index]:
+                        min_index = j
 
-                    candid_d_2[row, min_index], candid_d_2[row, i] = \
-                    candid_d_2[row, i], candid_d_2[row, min_index]
+                candid_d_2[row, min_index], candid_d_2[row, i] = \
+                candid_d_2[row, i], candid_d_2[row, min_index]
 
     cuda.syncthreads()
 
 @cuda.jit
 def cross_over_gpu(random_arr, candid_d_1, candid_d_2, child_d_1, child_d_2, parent_d_1, parent_d_2, crossover_prob):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
-    # crossover_prob = 60
     for row in range(threadId_row, candid_d_1.shape[0], stride_x):
         for col in range(threadId_col, candid_d_1.shape[1] - 1, stride_y):
             if col > 1 and col < child_d_1.shape[1]-1:
@@ -501,7 +550,7 @@ def cross_over_gpu(random_arr, candid_d_1, candid_d_2, child_d_1, child_d_2, par
 @cuda.jit
 def mutate(rng_states, child_d_1, child_d_2, mutation_prob):    
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, child_d_1.shape[0], stride_x):    
     # Swap two positions in the children, with 0.3 probability
@@ -554,7 +603,7 @@ def mutate(rng_states, child_d_1, child_d_2, mutation_prob):
 @cuda.jit
 def inverse_mutate(random_min_max, pop, random_arr, mutation_prob):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
     
     for row in range(threadId_row, pop.shape[0], stride_x):
         if random_arr[row,0] <= mutation_prob:
@@ -570,7 +619,7 @@ def inverse_mutate(random_min_max, pop, random_arr, mutation_prob):
 @cuda.jit
 def select_individual(index, pop_d, individual):
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop_d.shape[0], stride_x):
         if row == index and threadId_col < pop_d.shape[1]:
@@ -579,7 +628,7 @@ def select_individual(index, pop_d, individual):
 @cuda.jit
 def update_pop(count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d):    
     threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y = cuda.gridsize(2)
+    stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop_d.shape[0], stride_x):    
         for col in range(threadId_col, pop_d.shape[1], stride_y):
@@ -616,59 +665,36 @@ def update_pop(count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d):
 # ------------------------- Definition of CPU functions ----------------------------------------------   
 def select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize):
     # Select the best 5% from paernt 1 & parent 2:
-    
-    pool = parent_d_1[parent_d_1[:,-1].argsort()][0:0.9*popsize,:]
-    # pool = parent_d_1[parent_d_1[:,-1].argsort()][0:0.7*popsize,:]
-    # pool = parent_d_1[parent_d_1[:,-1].argsort()][0:0.05*popsize,:]
-    
-    pool = cp.concatenate((pool, parent_d_2[parent_d_2[:,-1].argsort()][0:0.9*popsize,:]))
-    # pool = cp.concatenate((pool, parent_d_2[parent_d_2[:,-1].argsort()][0:0.7*popsize,:]))
-    # pool = cp.concatenate((pool, parent_d_2[parent_d_2[:,-1].argsort()][0:0.05*popsize,:]))
-    
+    pool = parent_d_1[parent_d_1[:,-1].argsort()][0:0.9*popsize,:]    
+    pool = cp.concatenate((pool, parent_d_2[parent_d_2[:,-1].argsort()][0:0.9*popsize,:]))    
     pool = pool[pool[:,-1].argsort()]
 
     # Sort child 1 & child 2:
     child_d_1 = child_d_1[child_d_1[:,-1].argsort()]
     child_d_2 = child_d_2[child_d_2[:,-1].argsort()]
 
-    pop_d[0:0.9*popsize, :] = pool[0:0.9*popsize, :]
-    # pop_d[0:0.7*popsize, :] = pool[0:0.7*popsize, :]
-    # pop_d[0:0.05*popsize, :] = pool[0:0.05*popsize, :]
-    
-    pop_d[0.9*popsize:0.95*popsize, :] = child_d_1[0:0.05*popsize, :]
-    # pop_d[0.7*popsize:0.85*popsize, :] = child_d_1[0:0.15*popsize, :]
-    # pop_d[0.05*popsize:0.51*popsize, :] = child_d_1[0:0.46*popsize, :]
-    
+    pop_d[0:0.9*popsize, :] = pool[0:0.9*popsize, :]    
+    pop_d[0.9*popsize:0.95*popsize, :] = child_d_1[0:0.05*popsize, :]    
     pop_d[0.95*popsize:popsize, :] = child_d_2[0:0.05*popsize, :]
-    # pop_d[0.85*popsize:popsize, :] = child_d_2[0:0.15*popsize, :]
-    # pop_d[0.5*popsize:popsize, :] = child_d_2[0:0.5*popsize, :]
-
-def cp_unique_axis0(array):
-    if len(array.shape) != 2:
-        raise ValueError("Input array must be 2D.")
-    sortarr     = array[cp.lexsort(array.T[::-1])]
-    mask        = cp.empty(array.shape[0], dtype=np.bool_)
-    mask[0]     = True
-    mask[1:]    = cp.any(sortarr[1:] != sortarr[:-1], axis=1)
-    return sortarr[mask]
 
 def nCr(n,r):
     f = np.math.factorial
     return int(f(n) / (f(r) * f(n-r)))
 
+def cleanUp(del_list):
+    del del_list[:]
+
+
 # ------------------------- Main Function ------------------------------------------------------------
 try:
     vrp_capacity, data, opt = readInput()
-    n = int(sys.argv[4])
-    crossover_prob = int(sys.argv[5])
-    mutation_prob = int(sys.argv[6])
-    popsize = -(-(n*(data.shape[0] - 1))//1000)*1000
+    n                       = int(sys.argv[4])
+    crossover_prob          = int(sys.argv[5])
+    mutation_prob           = int(sys.argv[6])
+    popsize                 = -(-(n*(data.shape[0] - 1))//1000)*1000
     
     print('Taking population size {}*number of nodes'.format(n))
     
-    min_n = 1 # Minimum number of crossover points
-    max_n = 1 # Maximum number of crossover points
-
     try:
         generations = int(sys.argv[2])
     except:
@@ -679,98 +705,84 @@ try:
     data_d       = cuda.to_device(data)
 
     # Linear upper triangle of cost table (width=nC2))    
-    linear_cost_table = cp.zeros((nCr(data.shape[0], 2)), dtype=np.int16)
-
-    pop_d = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int16)
-
-    missing_d        = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=np.int16)
-    missing_elements = cp.ones(shape=(popsize,1), dtype=bool)
+    linear_cost_table  = cp.zeros((nCr(data.shape[0], 2)), dtype=np.int32)
+    pop_d              = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int32)
+    auxiliary_arr      = cp.zeros(shape=(popsize, data_d.shape[0]), dtype=np.int32)
     
     # GPU grid configurations:
-    grid      = gpuGrid.GRID()
+    grid               = gpuGrid.GRID()
     blocks_x, blocks_y = grid.blockAlloc(data.shape[0], float(n))
-    tpb_x, tpb_y      = grid.threads_x, grid.threads_y
+    tpb_x, tpb_y       = grid.threads_x, grid.threads_y
 
     print(grid)
-    blocks            = (blocks_x, blocks_y)
-    threads_per_block = (tpb_x, tpb_y)   
+    blocks             = (blocks_x, blocks_y)
+    threads_per_block  = (tpb_x, tpb_y)   
 
     val = val.VRP(sys.argv[1], data.shape[0])
     val.read()
     val.costTable()
     
     # --------------Calculate the cost table----------------------------------------------
-    calculateLinearizedCost[blocks, threads_per_block](data_d, popsize, linear_cost_table)
-    # 
+    calculateLinearizedCost[blocks, threads_per_block](data_d, linear_cost_table)
     
-    # profiling the 2D function:
-    # print('Time taken for cost table calculation:\n')
-    # time_start = time.time()
-    # for i in range(1000):
-    #     calc_cost_gpu[blocks, threads_per_block](data_d, popsize, vrp_capacity, cost_table_d)
-    #     time_end = time.time()
-    #     print(time_end - time_start, '\n')
-
-    # print('Time taken for linearized cost table calculation:\n')
-    # time_start = time.time()
-    # for i in range(1000):
-    #     calculateLinearizedCost[blocks, threads_per_block](data_d, popsize, linear_cost_table)
-    #     time_end = time.time()
-    #     print(time_end - time_start, '\n')
-    # -------------------------------------------------------------------------------------
-
-    # calc_cost_gpu[blocks, threads_per_block](data_d, popsize, vrp_capacity, cost_table_d)
-
-    # linearized_table = np.zeros((nCr(data.shape[0], 2)), dtype=np.int16)
-    
-    # ------------------Validating the linearized cost table--------------------------------
-    # d = cost_table_d.copy_to_host()
-
-    # for i in range(data.shape[0]):
-    #     for j in range(i+1, data.shape[0]):
-    #             k = int(j-1-i*(0.5*i-data.shape[0]+1.5))
-    #             linearized_table[k] = d[i,j]
-    # print('\n Linearized cost table from CPU:\n', linearized_table)
-    # print('\n Linearized cost table from GPU:\n', linear_cost_table)
-    # exit()
     # --------------Initialize population----------------------------------------------
     rng_states = create_xoroshiro128p_states(threads_per_block[0]**2 * blocks[0]**2, seed=random.randint(2,2*10**5))
-    initializePop_gpu[blocks, threads_per_block](rng_states, data_d, missing_d, pop_d)
+    initializePop_gpu[blocks, threads_per_block](data_d, pop_d)
 
     for individual in pop_d:
         cp.random.shuffle(individual[2:-1])
 
     find_duplicates[blocks, threads_per_block](pop_d, r_flag)
+    print(pop_d[3,:])
+    shift_r_flag[blocks, threads_per_block](r_flag, pop_d)
+    print(pop_d[3,:])
+    exit()
 
-    find_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, pop_d)
-    add_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, pop_d)
-
-    shift_r_flag[blocks, threads_per_block](r_flag, vrp_capacity, data_d, pop_d)
     cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, pop_d)
     cleanup_r_flag[blocks, threads_per_block](r_flag, pop_d)
 
     # --------------Calculate fitness----------------------------------------------
+    # time_list = []
+        
+    # for i in range(1000):
+    #     start_time = timer()
+    #     pop_d[:, -1] = 0
+    #     fitness_gpu[blocks, threads_per_block](linear_cost_table, pop_d, data_d.shape[0])
+    #     end_time = timer()
+    #     time_list.append(end_time - start_time)
+    # print('Average time of new function: {} seconds +/- {}'.format(np.mean(time_list), np.std(time_list)))
+
+    # for i in range(1000):
+    #     start_time = timer()
+    #     fitness_gpu_old[blocks, threads_per_block](linear_cost_table, pop_d, data_d.shape[0])
+    #     end_time = timer()
+    #     time_list.append(end_time - start_time)
+    # print('Average time of old function: {} seconds +/- {}'.format(np.mean(time_list), np.std(time_list)))
+
+    # exit()
+    pop_d[:, -1] = 0
     fitness_gpu[blocks, threads_per_block](linear_cost_table, pop_d, data_d.shape[0])
+
     # -------------------------------------------------------------------------------------
     pop_d = pop_d[pop_d[:,-1].argsort()] # Sort the population to get the best later
 
-    # asnumpy_first_pop = cp.asnumpy(pop_d)
-
     # --------------Evolve population for some generations----------------------------------------------
     # Create the pool of 6 arrays of the same length
-    candid_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
-    candid_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
-    candid_d_3 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
-    candid_d_4 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    candid_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    candid_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    candid_d_3 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    candid_d_4 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
 
-    parent_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
-    parent_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    parent_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    parent_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
 
-    child_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
-    child_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int16)
+    child_d_1 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
+    child_d_2 = cp.ones((popsize, pop_d.shape[1]), dtype=np.int32)
 
-    cut_idx = np.ones(shape=(pop_d.shape[1]), dtype=np.int16)
-    cut_idx_d = cuda.to_device(cut_idx)
+    cut_idx_d = cp.ones(shape=(pop_d.shape[1]), dtype=np.int32)
+    
+    del_list = [data_d, linear_cost_table, pop_d, auxiliary_arr, candid_d_1, candid_d_2, candid_d_3, \
+                candid_d_4, parent_d_1, parent_d_2, child_d_1, child_d_2, cut_idx_d]
 
     minimum_cost = float('Inf')
     old_time = timer()
@@ -802,7 +814,7 @@ try:
                     (pop_d, candid_d_1, candid_d_2, candid_d_3, candid_d_4, parent_d_1, parent_d_2)  
         
         number_cut_points[blocks, threads_per_block](candid_d_1, candid_d_2, \
-                            candid_d_3, candid_d_4, parent_d_1, parent_d_2, count, min_n, max_n)
+                             candid_d_3, candid_d_4, parent_d_1, parent_d_2)
         
         rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
         add_cut_points[blocks, threads_per_block](candid_d_1, candid_d_2, rng_states)
@@ -822,46 +834,66 @@ try:
         random_min_max = cp.random.randint(2, pop_d.shape[1]-2, (popsize, 2))
         random_min_max.sort()
         random_arr = cp.random.randint(1, 100, (popsize, 1))
-        inverse_mutate[blocks, threads_per_block](random_min_max, child_d_2, random_arr, mutation_prob)
+        inverse_mutate[blocks, threads_per_block](random_min_max, child_d_2, random_arr, mutation_prob)       
+
+        # time profiling old and new functions:
+        # time_list = []
         
+        # for i in range(1000):
+        #     start_time = timer()
+        #     find_duplicates[blocks, threads_per_block](child_d_1, r_flag)
+        #     find_missing_nodes[blocks, threads_per_block](data_d, missing_d, child_d_1)
+        #     add_missing_nodes[blocks, threads_per_block](missing_d, child_d_1, r_flag)
+        #     end_time = timer()
+        #     time_list.append(end_time - start_time)
+        # print('Average time of new function: {} seconds +/- {}'.format(np.mean(time_list), np.std(time_list)))
+
+        # for i in range(1000):
+        #     start_time = timer()
+        #     find_duplicates_old[blocks, threads_per_block](child_d_1, r_flag)
+        #     find_missing_nodes_old[blocks, threads_per_block](data_d, missing_d, child_d_1)
+        #     add_missing_nodes_old[blocks, threads_per_block](missing_d, child_d_1, r_flag)
+        #     end_time = timer()
+        #     time_list.append(end_time - start_time)
+        # print('Average time of old function: {} seconds +/- {}'.format(np.mean(time_list), np.std(time_list)))
+
+        # cleanUp(del_list)
+        # exit()
+
         # Adjusting child_1 array
         find_duplicates[blocks, threads_per_block](child_d_1, r_flag)
-
-        find_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, child_d_1)
-        add_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, child_d_1)
-
-        shift_r_flag[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)
+        find_missing_nodes[blocks, threads_per_block](data_d, auxiliary_arr, child_d_1)
+        add_missing_nodes[blocks, threads_per_block](auxiliary_arr, child_d_1, r_flag)
+        shift_r_flag[blocks, threads_per_block](r_flag, child_d_1)
         cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)
         cleanup_r_flag[blocks, threads_per_block](r_flag, child_d_1)
         
         # Adjusting child_2 array
         find_duplicates[blocks, threads_per_block](child_d_2, r_flag)
 
-        find_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, child_d_2)
-        add_missing_nodes[blocks, threads_per_block](r_flag, data_d, missing_d, child_d_2)
+        find_missing_nodes[blocks, threads_per_block](data_d, auxiliary_arr, child_d_2)
+        add_missing_nodes[blocks, threads_per_block](auxiliary_arr, child_d_2, r_flag)
 
-        shift_r_flag[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_2)
+        shift_r_flag[blocks, threads_per_block](r_flag, child_d_2)
         cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_2)
         cleanup_r_flag[blocks, threads_per_block](r_flag, child_d_2)    
         # --------------------------------------------------------------------------
         # Performing the two-opt optimization and Calculating fitness for child_1 array
-        reset_to_ones[blocks, threads_per_block](candid_d_3)
-        
+        reset_to_ones[blocks, threads_per_block](candid_d_3)        
         two_opt[blocks, threads_per_block](child_d_1, linear_cost_table, candid_d_3, data_d.shape[0])
 
-        # fitness_gpu[blocks, threads_per_block](cost_table_d, child_d_1)
-        fitness_gpu[blocks, threads_per_block](linear_cost_table , child_d_1, data_d.shape[0])
+        child_d_1[:, -1] = 0
+        fitness_gpu[blocks, threads_per_block](linear_cost_table, child_d_1, data_d.shape[0])
         # --------------------------------------------------------------------------
         # Performing the two-opt optimization and Calculating fitness for child_2 array
         reset_to_ones[blocks, threads_per_block](candid_d_3)
-
         two_opt[blocks, threads_per_block](child_d_2, linear_cost_table, candid_d_3, data_d.shape[0])
 
-        # fitness_gpu[blocks, threads_per_block](cost_table_d, child_d_2)
+        child_d_2[:, -1] = 0
         fitness_gpu[blocks, threads_per_block](linear_cost_table, child_d_2, data_d.shape[0])
         # --------------------------------------------------------------------------
         # Creating the new population from parents and children
-        # update_pop[blocks, threads_per_block](count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d)
+        update_pop[blocks, threads_per_block](count, parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d)
         select_bests(parent_d_1, parent_d_2, child_d_1, child_d_2, pop_d, popsize)
 
         # --------------------------------------------------------------------------
@@ -919,23 +951,25 @@ try:
     print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
     text_out.close()
 
-    del data_d
-    del linear_cost_table
-    del pop_d
-    del missing_d
+    cleanUp(del_list)
 
-    del candid_d_1
-    del candid_d_2
-    del candid_d_3
-    del candid_d_4
+    # del data_d
+    # del linear_cost_table
+    # del pop_d
+    # del missing_d
 
-    del parent_d_1
-    del parent_d_2
+    # del candid_d_1
+    # del candid_d_2
+    # del candid_d_3
+    # del candid_d_4
 
-    del child_d_1
-    del child_d_2
+    # del parent_d_1
+    # del parent_d_2
 
-    del cut_idx_d
+    # del child_d_1
+    # del child_d_2
+
+    # del cut_idx_d
 
 except KeyboardInterrupt:
     current_time = timer()
@@ -962,20 +996,22 @@ except KeyboardInterrupt:
     print('Best solution:', best_sol, end = '\n---------\n', file=text_out)
     text_out.close()
 
-    del data_d
-    del linear_cost_table
-    del pop_d
-    del missing_d
+    cleanUp(del_list)
 
-    del candid_d_1
-    del candid_d_2
-    del candid_d_3
-    del candid_d_4
+    # del data_d
+    # del linear_cost_table
+    # del pop_d
+    # del missing_d
 
-    del parent_d_1
-    del parent_d_2
+    # del candid_d_1
+    # del candid_d_2
+    # del candid_d_3
+    # del candid_d_4
 
-    del child_d_1
-    del child_d_2
+    # del parent_d_1
+    # del parent_d_2
 
-    del cut_idx_d
+    # del child_d_1
+    # del child_d_2
+
+    # del cut_idx_d
