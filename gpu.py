@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -------- Start of the importing part -----------
 from numba import cuda, jit, int32, float32, int64
-from numba.cuda.random import create_xoroshiro128p_states, xoroshiro128p_uniform_float32, xoroshiro128p_normal_float32
+from numba.cuda.random import create_xoroshiro128p_states, xoroshiro128p_uniform_float32
 import cupy as cp
 from math import pow, hypot, ceil, floor, log
 from timeit import default_timer as timer
@@ -428,7 +428,7 @@ def selectParents(pop_d, random_arr_d, parent_idx):
                 parent_idx[row, 1] = candid_4_idx
        
 @cuda.jit
-def assignCutPoints(pop_d, auxiliary_arr, parent_idx):    
+def getParentLengths(no_of_cuts, pop_d, auxiliary_arr, parent_idx):    
     threadId_row, threadId_col = cuda.grid(2)
     stride_x, stride_y         = cuda.gridsize(2)
 
@@ -447,7 +447,40 @@ def assignCutPoints(pop_d, auxiliary_arr, parent_idx):
             # Minimum length of the two parents
             cuda.atomic.min(auxiliary_arr, (row, 3), auxiliary_arr[row, 2])
 
-            auxiliary_arr[row, 4] = 1 # 1-point crossover
+            auxiliary_arr[row, 4] = no_of_cuts # k-point crossover
+
+@cuda.jit
+def add_cut_points_mid(auxiliary_arr, rng_states):
+    threadId_row, threadId_col = cuda.grid(2)
+    stride_x, stride_y         = cuda.gridsize(2)
+
+    for row in range(threadId_row, auxiliary_arr.shape[0], stride_x):
+        if threadId_col == 15:
+            no_cuts = auxiliary_arr[row, 4]
+            
+            for i in range(5, no_cuts+5):
+                rnd_val = 0
+                
+            # Generate unique random numbers as cut indices:
+                for j in range(5, no_cuts+5):
+                    while rnd_val == 0 or rnd_val == auxiliary_arr[row, j]:
+                        rnd = xoroshiro128p_uniform_float32(rng_states, row*auxiliary_arr.shape[1])\
+                            *(auxiliary_arr[row, 3] - 2) + 2 # random*(max-min)+min
+                        
+                        rnd_val = int(rnd)+2            
+                
+                auxiliary_arr[row, i] = rnd_val
+                
+            # Sorting the crossover points:
+            for i in range(5, no_cuts+5):
+                min_index = i
+                for j in range(i + 1, no_cuts+5):
+                    # Select the smallest value
+                    if auxiliary_arr[row, j] < auxiliary_arr[row, min_index]:
+                        min_index = j
+
+                auxiliary_arr[row, min_index], auxiliary_arr[row, i] = \
+                auxiliary_arr[row, i], auxiliary_arr[row, min_index]
 
 @cuda.jit
 def add_cut_points(auxiliary_arr, rng_states):
@@ -480,7 +513,7 @@ def add_cut_points(auxiliary_arr, rng_states):
                         min_index = j
 
                 auxiliary_arr[row, min_index], auxiliary_arr[row, i] = \
-                auxiliary_arr[row, i], auxiliary_arr[row, min_index]
+                auxiliary_arr[row, i], auxiliary_arr[row, min_index]                
 
 @cuda.jit
 def crossOver(random_arr, auxiliary_arr, child_d_1, child_d_2, pop_d, parent_idx, crossover_prob):
@@ -524,12 +557,12 @@ def crossOver(random_arr, auxiliary_arr, child_d_1, child_d_2, pop_d, parent_idx
 
 # ------------------------------------Mutation part -----------------------------------------------
 @cuda.jit
-def inverseMutate(random_min_max, pop, random_arr, mutation_prob):
+def inverseMutate(random_min_max, pop, random_no, mutation_prob):
     threadId_row, threadId_col = cuda.grid(2)
     stride_x, stride_y         = cuda.gridsize(2)
     
     for row in range(threadId_row, pop.shape[0], stride_x):
-        if random_arr[row,0] <= mutation_prob:
+        if random_no[row,0] <= mutation_prob:
             for col in range(threadId_col, pop.shape[1], stride_y):
                 start  = random_min_max[row, 0]
                 ending = random_min_max[row, 1]
@@ -637,6 +670,7 @@ try:
     crossover_prob          = int(sys.argv[5])
     mutation_prob           = int(sys.argv[6])
     popsize                 = -(-(n*(data.shape[0] - 1))//1000)*1000
+    crossover_points        = 1
     
     print('Taking population size {}*number of nodes'.format(n))
     
@@ -671,7 +705,6 @@ try:
     calculateLinearizedCost[blocks, threads_per_block](data_d, linear_cost_table)
     
     # --------------Initialize population----------------------------------------------
-    rng_states = create_xoroshiro128p_states(threads_per_block[0]**2 * blocks[0]**2, seed=random.randint(2,2*10**5))
     initializePop[blocks, threads_per_block](data_d, pop_d)
 
     for individual in pop_d:
@@ -732,26 +765,28 @@ try:
             cp.random.shuffle(random_arr_d[:,j])
                 
         # Select parents:
-        selectParents [blocks, threads_per_block](pop_d, random_arr_d   , parent_idx)
-        assignCutPoints[blocks, threads_per_block](pop_d, auxiliary_arr, parent_idx)
+        selectParents   [blocks, threads_per_block](pop_d, random_arr_d, parent_idx)
+        getParentLengths[blocks, threads_per_block](crossover_points, pop_d, auxiliary_arr, parent_idx)
         
         rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
         add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)
+        # print(auxiliary_arr[:10,:10])
+        # cleanUp(del_list)
+        # exit()
       
         random_arr = cp.random.randint(1, 100, (popsize, 1))
         crossOver[blocks, threads_per_block](random_arr, auxiliary_arr, child_d_1, child_d_2, pop_d, parent_idx, crossover_prob)
 
         # Performing mutation:
-        rng_states     = create_xoroshiro128p_states(popsize*child_d_1.shape[1], seed=random.randint(2,2*10**5))
         random_min_max = cp.random.randint(2, pop_d.shape[1]-2, (popsize, 2))
         random_min_max.sort()
-        random_arr     = cp.random.randint(1, 100, (popsize, 1))
-        inverseMutate[blocks, threads_per_block](random_min_max, child_d_1, random_arr, mutation_prob)
+        random_no_arr  = cp.random.randint(1, 100, (popsize, 1))
+        inverseMutate[blocks, threads_per_block](random_min_max, child_d_1, random_no_arr, mutation_prob)
         
         random_min_max = cp.random.randint(2, pop_d.shape[1]-2, (popsize, 2))
         random_min_max.sort()
-        random_arr     = cp.random.randint(1, 100, (popsize, 1))
-        inverseMutate[blocks, threads_per_block](random_min_max, child_d_2, random_arr, mutation_prob)       
+        random_no_arr  = cp.random.randint(1, 100, (popsize, 1))
+        inverseMutate[blocks, threads_per_block](random_min_max, child_d_2, random_no_arr, mutation_prob)       
            
         # time profiling old and new functions:
         # time_list = []
