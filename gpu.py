@@ -540,7 +540,7 @@ def inverseMutate(random_min_max, pop, random_no, mutation_prob):
 
 # -------------------------- Update population part -----------------------------------------------
 @cuda.jit
-def update_pop(count, parent_idx, child_d_1, child_d_2, pop_d):    
+def updatePop(count, parent_idx, child_d_1, child_d_2, pop_d):    
     threadId_row, threadId_col = cuda.grid(2)
     stride_x, stride_y         = cuda.gridsize(2)
 
@@ -582,26 +582,22 @@ def findMissingNodes(data_d, pop, auxiliary_arr):
 
 def generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr):
     if crossover_points == 1:
+        # assign cut points from the middle two quartiles
         auxiliary_arr[:, 5] = cp.random.randint((pop_d.shape[1]//4)*2, (pop_d.shape[1]//4)*3, size=popsize, dtype=cp.int32)
     else:
         rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
         add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)    
 
-def select_bests(parent_idx, child_d_1, child_d_2, pop_d, popsize):
-    # Select the best 5% from paernt 1 & parent 2:
-    parent_1 = pop_d[parent_idx[:, 0]] 
-    parent_2 = pop_d[parent_idx[:, 1]]
+def elitism(parent_idx, child_d_1, child_d_2, pop_d, popsize):
 
-    pool     = parent_1[parent_1[:,-1].argsort()][0:0.5*popsize,:] 
-    pool     = cp.concatenate((pool, parent_2[parent_2[:,-1].argsort()][0:0.5*popsize,:]))    
-    pool     = pool[pool[:,-1].argsort()]
+    # 5% from parents
+    pop_d[0:0.5*popsize, :] = pop_d[pop_d[:, -1].argsort()][0:0.5*popsize,:]
 
     # Sort child 1 & child 2:
     child_d_1 = child_d_1[child_d_1[:,-1].argsort()]
     child_d_2 = child_d_2[child_d_2[:,-1].argsort()]
 
-    # 5% from parents, 45% from child 1, and 50% from child 2:  
-    pop_d[0:0.05*popsize, :]            = pool[0:0.05*popsize, :]    
+    # 45% from child 1, and 50% from child 2:  
     pop_d[0.05*popsize:0.5*popsize, :]  = child_d_1[0:0.45*popsize, :]    
     pop_d[0.5*popsize:popsize, :]       = child_d_2[0:0.5*popsize, :]
 
@@ -816,8 +812,8 @@ try:
         computeFitness[blocks, threads_per_block](linear_cost_table, child_d_2, data_d.shape[0])        
 
         # Creating the new population from parents and children:
-        update_pop[blocks, threads_per_block](count, parent_idx, child_d_1, child_d_2, pop_d)
-        select_bests(parent_idx, child_d_1, child_d_2, pop_d, popsize)
+        updatePop[blocks, threads_per_block](count, parent_idx, child_d_1, child_d_2, pop_d)
+        elitism(parent_idx, child_d_1, child_d_2, pop_d, popsize)
 
         # Picking best solution:
         best_sol      = pop_d[pop_d[:,-1].argmin()]
