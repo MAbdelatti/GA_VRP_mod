@@ -450,39 +450,6 @@ def getParentLengths(no_of_cuts, pop_d, auxiliary_arr, parent_idx):
             auxiliary_arr[row, 4] = no_of_cuts # k-point crossover
 
 @cuda.jit
-def add_cut_points_mid(auxiliary_arr, rng_states):
-    threadId_row, threadId_col = cuda.grid(2)
-    stride_x, stride_y         = cuda.gridsize(2)
-
-    for row in range(threadId_row, auxiliary_arr.shape[0], stride_x):
-        if threadId_col == 15:
-            no_cuts = auxiliary_arr[row, 4]
-            
-            for i in range(5, no_cuts+5):
-                rnd_val = 0
-                
-            # Generate unique random numbers as cut indices:
-                for j in range(5, no_cuts+5):
-                    while rnd_val == 0 or rnd_val == auxiliary_arr[row, j]:
-                        rnd = xoroshiro128p_uniform_float32(rng_states, row*auxiliary_arr.shape[1])\
-                            *(auxiliary_arr[row, 3] - 2) + 2 # random*(max-min)+min
-                        
-                        rnd_val = int(rnd)+2            
-                
-                auxiliary_arr[row, i] = rnd_val
-                
-            # Sorting the crossover points:
-            for i in range(5, no_cuts+5):
-                min_index = i
-                for j in range(i + 1, no_cuts+5):
-                    # Select the smallest value
-                    if auxiliary_arr[row, j] < auxiliary_arr[row, min_index]:
-                        min_index = j
-
-                auxiliary_arr[row, min_index], auxiliary_arr[row, i] = \
-                auxiliary_arr[row, i], auxiliary_arr[row, min_index]
-
-@cuda.jit
 def add_cut_points(auxiliary_arr, rng_states):
     threadId_row, threadId_col = cuda.grid(2)
     stride_x, stride_y         = cuda.gridsize(2)
@@ -513,8 +480,8 @@ def add_cut_points(auxiliary_arr, rng_states):
                         min_index = j
 
                 auxiliary_arr[row, min_index], auxiliary_arr[row, i] = \
-                auxiliary_arr[row, i], auxiliary_arr[row, min_index]                
-
+                auxiliary_arr[row, i], auxiliary_arr[row, min_index]
+      
 @cuda.jit
 def crossOver(random_arr, auxiliary_arr, child_d_1, child_d_2, pop_d, parent_idx, crossover_prob):
     threadId_row, threadId_col = cuda.grid(2)
@@ -612,6 +579,13 @@ def findMissingNodes(data_d, pop, auxiliary_arr):
     prepareAuxiliary  [blocks, threads_per_block] (data_d, auxiliary_arr)
     findExistingNodes [blocks, threads_per_block] (data_d.shape[0], pop, auxiliary_arr)
     deriveMissingNodes[blocks, threads_per_block] (data_d, auxiliary_arr)
+
+def generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr):
+    if crossover_points == 1:
+        auxiliary_arr[:, 5] = cp.random.randint((pop_d.shape[1]//4)*2, (pop_d.shape[1]//4)*3, size=popsize, dtype=cp.int32)
+    else:
+        rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
+        add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)    
 
 def select_bests(parent_idx, child_d_1, child_d_2, pop_d, popsize):
     # Select the best 5% from paernt 1 & parent 2:
@@ -768,8 +742,7 @@ try:
         selectParents   [blocks, threads_per_block](pop_d, random_arr_d, parent_idx)
         getParentLengths[blocks, threads_per_block](crossover_points, pop_d, auxiliary_arr, parent_idx)
         
-        rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
-        add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)
+        generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr)
         # print(auxiliary_arr[:10,:10])
         # cleanUp(del_list)
         # exit()
