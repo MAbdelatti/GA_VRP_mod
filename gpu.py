@@ -254,14 +254,14 @@ def deriveMissingNodes(data_d, missing_d):
                     missing_d[row, col] = 0                
 
 @cuda.jit
-def add_missing_nodes(missing_d, pop, r_flag):   
+def addMissingNodes(r_flag, missing_d, pop):   
     threadId_row, threadId_col = cuda.grid(2)
     stride_x, stride_y         = cuda.gridsize(2)
 
     for row in range(threadId_row, pop.shape[0], stride_x):
         for col in range(threadId_col, missing_d.shape[1], stride_y):
             if missing_d[row, col] != 0:
-                for j in range(1, pop.shape[1]-2):
+                for j in range(2, pop.shape[1]-1):
                     cuda.atomic.compare_and_swap(pop[row,j:], r_flag, missing_d[row, col])
                     if pop[row, j] == missing_d[row, col]:
                         break
@@ -814,22 +814,18 @@ try:
 
         # Adjusting child_1 array:
         find_duplicates   [blocks, threads_per_block](child_d_1, r_flag)
-        findMissingNodes(data_d, child_d_1, auxiliary_arr)      
-        add_missing_nodes [blocks, threads_per_block](auxiliary_arr, child_d_1, r_flag)
-        shift_r_flag      [blocks, threads_per_block](r_flag, child_d_1)
-        
-        cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)
-        
+        findMissingNodes  (data_d, child_d_1, auxiliary_arr)
+        addMissingNodes   [blocks, threads_per_block](r_flag, auxiliary_arr, child_d_1)
+        shift_r_flag      [blocks, threads_per_block](r_flag, child_d_1)        
+        cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)        
         cleanup_r_flag[blocks, threads_per_block](r_flag, child_d_1)
 
         # Adjusting child_2 array:
         find_duplicates   [blocks, threads_per_block](child_d_2, r_flag)
-        findMissingNodes(data_d, child_d_2, auxiliary_arr)
-        add_missing_nodes [blocks, threads_per_block](auxiliary_arr, child_d_2, r_flag)       
+        findMissingNodes  (data_d, child_d_2, auxiliary_arr)
+        addMissingNodes   [blocks, threads_per_block](r_flag, auxiliary_arr, child_d_2)
         shift_r_flag      [blocks, threads_per_block](r_flag, child_d_2)
-
         cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_2)
-
         cleanup_r_flag[blocks, threads_per_block](r_flag, child_d_2)    
 
         # Performing the two-opt optimization and Calculating fitness for child_1 array:
