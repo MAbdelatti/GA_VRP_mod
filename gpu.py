@@ -9,7 +9,6 @@ import numpy as np
 import random
 import sys
 from datetime import datetime
-import shutil
 import gpuGrid
 import val
 import time
@@ -580,7 +579,7 @@ def findMissingNodes(data_d, pop, auxiliary_arr):
     findExistingNodes [blocks, threads_per_block] (data_d.shape[0], pop, auxiliary_arr)
     deriveMissingNodes[blocks, threads_per_block] (data_d, auxiliary_arr)
 
-def generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr):
+def generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsize, auxiliary_arr):
     if crossover_points == 1:
         # assign cut points from the middle two quartiles
         auxiliary_arr[:, 5] = cp.random.randint((pop_d.shape[1]//4)*2, (pop_d.shape[1]//4)*3, size=popsize, dtype=cp.int32)
@@ -588,7 +587,7 @@ def generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr
         rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
         add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)    
 
-def elitism(parent_idx, child_d_1, child_d_2, pop_d, popsize):
+def elitism(child_d_1, child_d_2, pop_d, popsize):
 
     # 5% from parents
     pop_d[0:0.5*popsize, :] = pop_d[pop_d[:, -1].argsort()][0:0.5*popsize,:]
@@ -738,7 +737,7 @@ try:
         selectParents   [blocks, threads_per_block](pop_d, random_arr_d, parent_idx)
         getParentLengths[blocks, threads_per_block](crossover_points, pop_d, auxiliary_arr, parent_idx)
         
-        generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr)
+        generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsize, auxiliary_arr)
         # print(auxiliary_arr[:10,:10])
         # cleanUp(del_list)
         # exit()
@@ -813,7 +812,7 @@ try:
 
         # Creating the new population from parents and children:
         updatePop[blocks, threads_per_block](count, parent_idx, child_d_1, child_d_2, pop_d)
-        elitism(parent_idx, child_d_1, child_d_2, pop_d, popsize)
+        elitism  (child_d_1, child_d_2, pop_d, popsize)
 
         # Picking best solution:
         best_sol      = pop_d[pop_d[:,-1].argmin()]
