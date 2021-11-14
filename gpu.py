@@ -590,7 +590,7 @@ def generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsiz
 def elitism(child_d_1, child_d_2, pop_d, popsize):
 
     # 5% from parents
-    pop_d[0:int(0.5*popsize), :] = pop_d[pop_d[:, -1].argsort()][0:int(0.5*popsize),:]
+    pop_d[0:int(0.05*popsize), :] = pop_d[pop_d[:, -1].argsort()][0:int(0.05*popsize),:]
 
     # Sort child 1 & child 2:
     child_d_1 = child_d_1[child_d_1[:,-1].argsort()]
