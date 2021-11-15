@@ -813,10 +813,10 @@ try:
         updatePop[blocks, threads_per_block](count, parent_idx, child_d_1, child_d_2, pop_d)
         elitism  (child_d_1, child_d_2, pop_d, popsize)
 
-        # Picking best solution:
-        best_sol      = pop_d[pop_d[:,-1].argmin()]
+        # Picking the best and the worst solutions, population is already sorted at the elitism function:
+        best_sol      = pop_d[0, :]
         minimum_cost  = best_sol[-1]        
-        worst_cost    = pop_d[pop_d[:,-1].argmax()][-1]
+        worst_cost    = pop_d[-1, :][-1]
         delta         = worst_cost-minimum_cost
         average       = cp.average(pop_d[:,-1])
         
