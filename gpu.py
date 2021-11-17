@@ -588,17 +588,19 @@ def generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsiz
         add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)    
 
 def elitism(child_d_1, child_d_2, pop_d, popsize):
-
+    
     # 5% from parents
-    pop_d[0:int(0.05*popsize), :] = pop_d[pop_d[:, -1].argsort()][0:int(0.05*popsize),:]
+    pop_d = pop_d[pop_d[:, -1].argsort()]
 
     # Sort child 1 & child 2:
     child_d_1 = child_d_1[child_d_1[:,-1].argsort()]
     child_d_2 = child_d_2[child_d_2[:,-1].argsort()]
 
-    # 45% from child 1, and 50% from child 2:  
-    pop_d[int(0.05*popsize):int(0.5*popsize), :]  = child_d_1[0:int(0.45*popsize), :]    
-    pop_d[int(0.5*popsize):popsize, :]            = child_d_2[0:int(0.5*popsize), :]
+    # 45% from child 1, and 50% from child 2:
+    pop_d[floor(0.05*popsize):floor(0.5*popsize), :] = child_d_1[0:(floor(0.5*popsize)-floor(0.05*popsize)), :]
+    pop_d[floor(0.5 *popsize):-1, :]                 = child_d_2[0:(popsize - floor(0.5 *popsize)-1), :]
+    
+    pop_d = pop_d[pop_d[:, -1].argsort()]
 
 def showExecutionReport(count, start_time, best_sol):           
         end_time      = timer()
