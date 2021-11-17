@@ -9,7 +9,6 @@ import numpy as np
 import random
 import sys
 from datetime import datetime
-import shutil
 import gpuGrid
 import val
 import time
@@ -574,13 +573,13 @@ def updatePop(count, parent_idx, child_d_1, child_d_2, pop_d):
             pop_d[row, 0]   = count
                 
 # ------------------------- Definition of CPU functions ----------------------------------------------   
-def findMissingNodes(data_d, pop, auxiliary_arr):
+def findMissingNodes(blocks, threads_per_block, data_d, pop, auxiliary_arr):
     reset_to_ones     [blocks, threads_per_block] (auxiliary_arr)
     prepareAuxiliary  [blocks, threads_per_block] (data_d, auxiliary_arr)
     findExistingNodes [blocks, threads_per_block] (data_d.shape[0], pop, auxiliary_arr)
     deriveMissingNodes[blocks, threads_per_block] (data_d, auxiliary_arr)
 
-def generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr):
+def generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsize, auxiliary_arr):
     if crossover_points == 1:
         # assign cut points from the middle two quartiles
         auxiliary_arr[:, 5] = cp.random.randint((pop_d.shape[1]//4)*2, (pop_d.shape[1]//4)*3, size=popsize, dtype=cp.int32)
@@ -588,18 +587,18 @@ def generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr
         rng_states = create_xoroshiro128p_states(popsize*pop_d.shape[1], seed=random.randint(2,2*10**5))
         add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)    
 
-def elitism(parent_idx, child_d_1, child_d_2, pop_d, popsize):
+def elitism(child_d_1, child_d_2, pop_d, popsize):
 
     # 5% from parents
-    pop_d[0:0.5*popsize, :] = pop_d[pop_d[:, -1].argsort()][0:0.5*popsize,:]
+    pop_d[0:int(0.05*popsize), :] = pop_d[pop_d[:, -1].argsort()][0:int(0.05*popsize),:]
 
     # Sort child 1 & child 2:
     child_d_1 = child_d_1[child_d_1[:,-1].argsort()]
     child_d_2 = child_d_2[child_d_2[:,-1].argsort()]
 
     # 45% from child 1, and 50% from child 2:  
-    pop_d[0.05*popsize:0.5*popsize, :]  = child_d_1[0:0.45*popsize, :]    
-    pop_d[0.5*popsize:popsize, :]       = child_d_2[0:0.5*popsize, :]
+    pop_d[int(0.05*popsize):int(0.5*popsize), :]  = child_d_1[0:int(0.45*popsize), :]    
+    pop_d[int(0.5*popsize):popsize, :]            = child_d_2[0:int(0.5*popsize), :]
 
 def showExecutionReport(count, start_time, best_sol):           
         end_time      = timer()
@@ -736,9 +735,8 @@ try:
                 
         # Select parents:
         selectParents   [blocks, threads_per_block](pop_d, random_arr_d, parent_idx)
-        getParentLengths[blocks, threads_per_block](crossover_points, pop_d, auxiliary_arr, parent_idx)
-        
-        generateCutPoints(blocks, threads_per_block, crossover_points, auxiliary_arr)
+        getParentLengths[blocks, threads_per_block](crossover_points, pop_d, auxiliary_arr, parent_idx)        
+        generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsize, auxiliary_arr)
         # print(auxiliary_arr[:10,:10])
         # cleanUp(del_list)
         # exit()
@@ -783,7 +781,7 @@ try:
 
         # Adjusting child_1 array:
         find_duplicates   [blocks, threads_per_block](child_d_1, r_flag)
-        findMissingNodes  (data_d, child_d_1, auxiliary_arr)
+        findMissingNodes  (blocks, threads_per_block, data_d, child_d_1, auxiliary_arr)
         addMissingNodes   [blocks, threads_per_block](r_flag, auxiliary_arr, child_d_1)
         shift_r_flag      [blocks, threads_per_block](r_flag, child_d_1)        
         cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_1)        
@@ -791,7 +789,7 @@ try:
 
         # Adjusting child_2 array:
         find_duplicates   [blocks, threads_per_block](child_d_2, r_flag)
-        findMissingNodes  (data_d, child_d_2, auxiliary_arr)
+        findMissingNodes  (blocks, threads_per_block, data_d, child_d_2, auxiliary_arr)
         addMissingNodes   [blocks, threads_per_block](r_flag, auxiliary_arr, child_d_2)
         shift_r_flag      [blocks, threads_per_block](r_flag, child_d_2)
         cap_adjust[blocks, threads_per_block](r_flag, vrp_capacity, data_d, child_d_2)
@@ -813,12 +811,12 @@ try:
 
         # Creating the new population from parents and children:
         updatePop[blocks, threads_per_block](count, parent_idx, child_d_1, child_d_2, pop_d)
-        elitism(parent_idx, child_d_1, child_d_2, pop_d, popsize)
+        elitism  (child_d_1, child_d_2, pop_d, popsize)
 
-        # Picking best solution:
-        best_sol      = pop_d[pop_d[:,-1].argmin()]
+        # Picking the best and the worst solutions, population is already sorted at the elitism function:
+        best_sol      = pop_d[0, :]
         minimum_cost  = best_sol[-1]        
-        worst_cost    = pop_d[pop_d[:,-1].argmax()][-1]
+        worst_cost    = pop_d[-1, :][-1]
         delta         = worst_cost-minimum_cost
         average       = cp.average(pop_d[:,-1])
         
@@ -832,7 +830,14 @@ try:
         
         count += 1
 
-    showExecutionReport(count, start_time, best_sol)   
+    pop_d = pop_d[pop_d[:,-1].argsort()]
+    best_sol      = pop_d[0, :]
+    minimum_cost  = best_sol[-1]        
+    worst_cost    = pop_d[-1, :][-1]
+    delta         = worst_cost-minimum_cost
+    average       = cp.average(pop_d[:,-1])
+    
+    showExecutionReport(count, start_time, best_sol)
     cleanUp(del_list)
 
 except KeyboardInterrupt:
