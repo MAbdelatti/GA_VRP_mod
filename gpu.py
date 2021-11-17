@@ -830,7 +830,14 @@ try:
         
         count += 1
 
-    showExecutionReport(count, start_time, best_sol)   
+    pop_d = pop_d[pop_d[:,-1].argsort()]
+    best_sol      = pop_d[0, :]
+    minimum_cost  = best_sol[-1]        
+    worst_cost    = pop_d[-1, :][-1]
+    delta         = worst_cost-minimum_cost
+    average       = cp.average(pop_d[:,-1])
+    
+    showExecutionReport(count, start_time, best_sol)
     cleanUp(del_list)
 
 except KeyboardInterrupt:
