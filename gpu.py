@@ -118,8 +118,12 @@ def calculateLinearizedCost(data_d, linear_cost_table):
         for col in range(threadId_col, data_d.shape[0], stride_y):
             if col > row:
                 k = int(col - (row*(0.5*row - data_d.shape[0] + 1.5)) - 1)
+
                 linear_cost_table[k] = \
-                round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))
+                round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))  # Euclidean distance
+
+                # linear_cost_table[k] = \
+                # round((data_d[row, 2] - data_d[col, 2]) + (data_d[row, 3] - data_d[col, 3]))  # Manhattan distance
 
 # ------------------------- Fitness calculation ---------------------------------------------
 @cuda.jit
@@ -599,8 +603,6 @@ def elitism(child_d_1, child_d_2, pop_d, popsize):
     # 45% from child 1, and 50% from child 2:
     pop_d[floor(0.05*popsize):floor(0.5*popsize), :] = child_d_1[0:(floor(0.5*popsize)-floor(0.05*popsize)), :]
     pop_d[floor(0.5 *popsize):-1, :]                 = child_d_2[0:(popsize - floor(0.5 *popsize)-1), :]
-    
-    pop_d = pop_d[pop_d[:, -1].argsort()]
 
 def showExecutionReport(count, start_time, best_sol):           
         end_time      = timer()
@@ -816,6 +818,7 @@ try:
         elitism  (child_d_1, child_d_2, pop_d, popsize)
 
         # Picking the best and the worst solutions, population is already sorted at the elitism function:
+        pop_d         = pop_d[pop_d[:, -1].argsort()]
         best_sol      = pop_d[0, :]
         minimum_cost  = best_sol[-1]        
         worst_cost    = pop_d[-1, :][-1]
@@ -831,8 +834,8 @@ try:
                 'delta: %d'%delta, 'Avg: %.2f'%average)
         
         count += 1
-
-    pop_d = pop_d[pop_d[:,-1].argsort()]
+    
+    pop_d         = pop_d[pop_d[:, -1].argsort()]
     best_sol      = pop_d[0, :]
     minimum_cost  = best_sol[-1]        
     worst_cost    = pop_d[-1, :][-1]
