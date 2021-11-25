@@ -120,10 +120,13 @@ def calculateLinearizedCost(data_d, linear_cost_table):
                 k = int(col - (row*(0.5*row - data_d.shape[0] + 1.5)) - 1)
 
                 linear_cost_table[k] = \
-                round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))  # Euclidean distance
+                hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3])               # Float Euclidean distance
 
                 # linear_cost_table[k] = \
-                # round((data_d[row, 2] - data_d[col, 2]) + (data_d[row, 3] - data_d[col, 3]))  # Manhattan distance
+                # round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))      # Integer Euclidean distance
+
+                # linear_cost_table[k] = \
+                # round(abs(data_d[row, 2] - data_d[col, 2]) + abs(data_d[row, 3] - data_d[col, 3]))  # Manhattan distance
 
 # ------------------------- Fitness calculation ---------------------------------------------
 @cuda.jit
@@ -164,7 +167,7 @@ def computeFitness(linear_cost_table, pop, n):
             if i != j:
                 k = int(j - (i*(0.5*i - n + 1.5)) - 1)
 
-                cuda.atomic.add(pop, (row, pop.shape[1]-1), linear_cost_table[k])
+                cuda.atomic.add(pop, (row, pop.shape[1]-1), int(linear_cost_table[k]*1000))
    
 # ------------------------- Refining solutions ---------------------------------------------
 @cuda.jit
@@ -657,7 +660,7 @@ try:
     data_d       = cuda.to_device(data)
 
     # Linear upper triangle of cost table (width=nC2))    
-    linear_cost_table  = cp.zeros((nCr(data.shape[0], 2)), dtype=np.int32)
+    linear_cost_table  = cp.zeros((nCr(data.shape[0], 2)), dtype=cp.float32)
     pop_d              = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int32)
     auxiliary_arr      = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=cp.int32)
     
@@ -819,6 +822,7 @@ try:
 
         # Picking the best and the worst solutions, population is already sorted at the elitism function:
         pop_d         = pop_d[pop_d[:, -1].argsort()]
+
         best_sol      = pop_d[0, :]
         minimum_cost  = best_sol[-1]        
         worst_cost    = pop_d[-1, :][-1]
