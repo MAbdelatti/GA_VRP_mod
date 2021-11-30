@@ -11,7 +11,9 @@ class GRID(object):
         # 20 is good for 4k-core  GPUs e.g., RTX 2080 Ti and v100
         # 10 is good for 2k-core  GPUs e.g., RTX 3050
         # 5  is good for GTX      GPUs e.g., GTX 1080
-        self.max_blocks    = 35
+
+        # Also: SMALLER PROBLEMS NEEDS FEWER BLOCKS
+        self.max_blocks    = 5 
 
     def __str__(self):
         return 'Grid object has ({}, {}) blocks and ({}, {}) threads per block'.format(self.blocks_x, self.blocks_y, self.threads_x, self.threads_y)
