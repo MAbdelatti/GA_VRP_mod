@@ -118,8 +118,15 @@ def calculateLinearizedCost(data_d, linear_cost_table):
         for col in range(threadId_col, data_d.shape[0], stride_y):
             if col > row:
                 k = int(col - (row*(0.5*row - data_d.shape[0] + 1.5)) - 1)
+
                 linear_cost_table[k] = \
-                round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))
+                hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3])               # Float Euclidean distance
+
+                # linear_cost_table[k] = \
+                # round(hypot(data_d[row, 2] - data_d[col, 2], data_d[row, 3] - data_d[col, 3]))      # Integer Euclidean distance
+
+                # linear_cost_table[k] = \
+                # round(abs(data_d[row, 2] - data_d[col, 2]) + abs(data_d[row, 3] - data_d[col, 3]))  # Manhattan distance
 
 # ------------------------- Fitness calculation ---------------------------------------------
 @cuda.jit
@@ -160,7 +167,7 @@ def computeFitness(linear_cost_table, pop, n):
             if i != j:
                 k = int(j - (i*(0.5*i - n + 1.5)) - 1)
 
-                cuda.atomic.add(pop, (row, pop.shape[1]-1), linear_cost_table[k])
+                cuda.atomic.add(pop, (row, pop.shape[1]-1), int(linear_cost_table[k]*1000))
    
 # ------------------------- Refining solutions ---------------------------------------------
 @cuda.jit
@@ -588,17 +595,17 @@ def generateCutPoints(blocks, threads_per_block, crossover_points, pop_d, popsiz
         add_cut_points[blocks, threads_per_block](auxiliary_arr, rng_states)    
 
 def elitism(child_d_1, child_d_2, pop_d, popsize):
-
+    
     # 5% from parents
-    pop_d[0:int(0.05*popsize), :] = pop_d[pop_d[:, -1].argsort()][0:int(0.05*popsize),:]
+    pop_d = pop_d[pop_d[:, -1].argsort()]
 
     # Sort child 1 & child 2:
     child_d_1 = child_d_1[child_d_1[:,-1].argsort()]
     child_d_2 = child_d_2[child_d_2[:,-1].argsort()]
 
-    # 45% from child 1, and 50% from child 2:  
-    pop_d[int(0.05*popsize):int(0.5*popsize), :]  = child_d_1[0:int(0.45*popsize), :]    
-    pop_d[int(0.5*popsize):popsize, :]            = child_d_2[0:int(0.5*popsize), :]
+    # 45% from child 1, and 50% from child 2:
+    pop_d[floor(0.05*popsize):floor(0.5*popsize), :] = child_d_1[0:(floor(0.5*popsize)-floor(0.05*popsize)), :]
+    pop_d[floor(0.5 *popsize):-1, :]                 = child_d_2[0:(popsize - floor(0.5 *popsize)-1), :]
 
 def showExecutionReport(count, start_time, best_sol):           
         end_time      = timer()
@@ -653,7 +660,7 @@ try:
     data_d       = cuda.to_device(data)
 
     # Linear upper triangle of cost table (width=nC2))    
-    linear_cost_table  = cp.zeros((nCr(data.shape[0], 2)), dtype=np.int32)
+    linear_cost_table  = cp.zeros((nCr(data.shape[0], 2)), dtype=cp.float32)
     pop_d              = cp.ones((popsize, int(1.5*data.shape[0])+2), dtype=np.int32)
     auxiliary_arr      = cp.zeros(shape=(popsize, pop_d.shape[1]), dtype=cp.int32)
     
@@ -814,6 +821,8 @@ try:
         elitism  (child_d_1, child_d_2, pop_d, popsize)
 
         # Picking the best and the worst solutions, population is already sorted at the elitism function:
+        pop_d         = pop_d[pop_d[:, -1].argsort()]
+
         best_sol      = pop_d[0, :]
         minimum_cost  = best_sol[-1]        
         worst_cost    = pop_d[-1, :][-1]
@@ -829,8 +838,8 @@ try:
                 'delta: %d'%delta, 'Avg: %.2f'%average)
         
         count += 1
-
-    pop_d = pop_d[pop_d[:,-1].argsort()]
+    
+    pop_d         = pop_d[pop_d[:, -1].argsort()]
     best_sol      = pop_d[0, :]
     minimum_cost  = best_sol[-1]        
     worst_cost    = pop_d[-1, :][-1]
