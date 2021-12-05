@@ -224,7 +224,7 @@ def find_duplicates(pop, r_flag):
             if col >= 2:
                 for j in range(col+1, pop.shape[1]-1):
                     if pop[row, col] != r_flag and pop[row, j] == pop[row, col]:
-                        pop[row, j] = r_flag                        
+                        pop[row, j] = r_flag
 
 @cuda.jit
 def prepareAuxiliary(data_d, missing_d):    
@@ -536,7 +536,7 @@ def inverseMutate(random_min_max, pop, random_no, mutation_prob):
     
     for row in range(threadId_row, pop.shape[0], stride_x):
         if random_no[row,0] <= mutation_prob:
-            for col in range(threadId_col, pop.shape[1], stride_y):
+            for col in range(threadId_col, pop.shape[1]-1, stride_y):
                 start  = random_min_max[row, 0]
                 ending = random_min_max[row, 1]
                 length = ending - start
