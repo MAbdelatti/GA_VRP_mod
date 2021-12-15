@@ -12,7 +12,18 @@ class GRID(object):
         return 'Grid object has {} blocks and ({}, {}) threads per block'.format(self.block_dict[self.arrangement], self.threads_x, self.threads_y)
 
     def blockAlloc(self, n, multiplier):
-        self.arrangement = 5 
+        if n <= 350:
+            self.arrangement = 1
+        elif n > 350:
+            self.arrangement = 2 
+        elif n >=600:
+            self.arrangement = 3 
+        elif n >=600:
+            self.arrangement = 4 
+        elif n >=800:
+            self.arrangement = 5 
+        elif n >=1000:
+            self.arrangement = 6 
 
         return self.block_dict[self.arrangement][0], self.block_dict[self.arrangement][1]
 
