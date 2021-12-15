@@ -3,29 +3,20 @@ from math import ceil, floor
 class GRID(object):
     def __init__(self):
         self.threads_x     = 32 
-        self.threads_y     = 12
-        self.min_blocks    = 5
+        self.threads_y     = 16
+        self.arrangement   = 1
 
-        # Max. no. of blocks in the grid:
-        # 35 is good for 10k-core GPUs e.g., RTX 3090
-        # 20 is good for 4k-core  GPUs e.g., RTX 2080 Ti and v100
-        # 10 is good for 2k-core  GPUs e.g., RTX 3050
-        # 5  is good for GTX      GPUs e.g., GTX 1080
-
-        # Also: SMALLER PROBLEMS NEEDS FEWER BLOCKS
-        self.max_blocks    = 5 
+        self.block_dict    = {1:(4, 4), 2:(8, 4), 3:(8, 8), 4:(16,8), 5:(16, 16), 6:(32, 16)}
 
     def __str__(self):
-        return 'Grid object has ({}, {}) blocks and ({}, {}) threads per block'.format(self.blocks_x, self.blocks_y, self.threads_x, self.threads_y)
+        return 'Grid object has {} blocks and ({}, {}) threads per block'.format(self.block_dict[self.arrangement], self.threads_x, self.threads_y)
 
     def blockAlloc(self, n, multiplier):
-        tbp         = self.threads_x
-        b_min       = self.min_blocks
-        b_max       = self.max_blocks
+        self.arrangement = 5 
 
-        self.blocks_x = int(min(b_max, max(b_min, floor((2.0*n)/tbp))))
-        self.blocks_y = min(b_max, 5*self.blocks_x)
-        # self.blocks_y = int(min(30, max(b, floor((n*multiplier)/tbp)))) - self.blocks_x
+        return self.block_dict[self.arrangement][0], self.block_dict[self.arrangement][1]
 
-        return self.blocks_x, self.blocks_y
+if __name__ == '__main__':
+    grid = GRID()
+    print(grid.blockAlloc(4,4))
 
